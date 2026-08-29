@@ -1,5 +1,5 @@
 {
-  "name": "put_vertical_ivrv",
+  "name": "put_vertical_ivrv_chainonly",
   "legs": [
     {
       "type": "put",
@@ -32,10 +32,6 @@
   "signal": {
     "iv_rv_ratio": [
       1.27,
-      null
-    ],
-    "vix_rv_ratio": [
-      1.4,
       null
     ]
   },

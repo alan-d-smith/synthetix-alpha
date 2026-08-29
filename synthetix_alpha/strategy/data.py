@@ -10,7 +10,7 @@ import pandas as pd
 from gs_quant.timeseries.technicals import bollinger_bands, macd, relative_strength_index
 
 from synthetix_alpha import config
-from synthetix_alpha.data import kaggle
+from synthetix_alpha.data import kaggle, vix
 
 COLS = ["expiration", "type", "strike", "bid", "ask", "mid", "iv", "delta", "underlying_price"]
 CACHE = config.ROOT / "datasets" / "cache" / "engine"
@@ -28,7 +28,7 @@ def build(underlying: str, source: str = "kaggle") -> tuple[pd.DataFrame, pd.Dat
     for c in ("strike", "bid", "ask", "mid", "iv", "delta", "underlying_price"):
         df[c] = df[c].astype("float32")
     df["type"] = df["type"].astype("category")
-    return df.set_index("date"), features(df, spot)
+    return df.set_index("date"), features(df, spot, underlying)
 
 
 def _dolt_chains(underlying: str) -> pd.DataFrame:
@@ -42,7 +42,7 @@ def _dolt_chains(underlying: str) -> pd.DataFrame:
     return chains.join(spot.rename("underlying_price"), on="date").dropna(subset=["underlying_price"]), spot
 
 
-def features(df: pd.DataFrame, spot: Optional[pd.Series] = None) -> pd.DataFrame:
+def features(df: pd.DataFrame, spot: Optional[pd.Series] = None, underlying: Optional[str] = None) -> pd.DataFrame:
     """Spot-based features on the daily spot series; IV-surface features on chain dates, forward-filled onto it."""
     rows = {}
     for date, d in df.groupby("date", sort=True):
@@ -61,11 +61,28 @@ def features(df: pd.DataFrame, spot: Optional[pd.Series] = None) -> pd.DataFrame
     f["iv_rank"] = f["atm_iv"].rolling(252, min_periods=60).rank(pct=True)
     f["iv_rv_ratio"] = f["atm_iv"] / f["rv20"]
     f["term_slope"] = f["far_iv"] - f["atm_iv"]
-    return f.drop(columns="far_iv").join(technicals(f["spot"]))
+    return f.drop(columns="far_iv").join(technicals(f["spot"])).join(vol_index(underlying, f.index, f["rv20"]))
+
+
+def vol_index(underlying: Optional[str], index, rv20: pd.Series) -> pd.DataFrame:
+    """VIX level and long-history percentile as market regime; the IV/RV ratio only where the index matches."""
+    if underlying is None:
+        return pd.DataFrame(index=index)
+    try:
+        s, matched = vix.for_underlying(underlying)
+    except (FileNotFoundError, KeyError):
+        return pd.DataFrame(index=index)
+    rank = s.rank(pct=True)  # ranked over 1990+ (VIX) / 2001+ (VXN), not a 252-day window
+    aligned = s.reindex(index).ffill()
+    out = {"vix": aligned, "vix_rank": rank.reindex(index).ffill()}
+    if matched:  # index IV over a different name's realised vol is not a ratio worth having
+        out["vix_rv_ratio"] = aligned / rv20
+    return pd.DataFrame(out, index=index)
 
 
 def technicals(spot: pd.Series) -> pd.DataFrame:
     """RSI, Bollinger position and MACD from gs-quant, all trailing."""
+    spot = spot.astype("float64")  # gs-quant writes float64 intermediates into the series
     bands = bollinger_bands(spot, 20, 2)
     low, high = bands.iloc[:, 0], bands.iloc[:, 1]
     return pd.DataFrame({

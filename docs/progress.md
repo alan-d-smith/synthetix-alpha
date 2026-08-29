@@ -18,5 +18,6 @@ scoring -9. Return is the mean across the underlyings traded, each on its own $1
 | 2026-08-29 07:52 | 2 | `idx_put_spread_ivrv_rich_v2_g1m0_g2m1` | SPY+QQQ | +2.5% | 1.01 | 0.99 | -1.1% | +0.2% | 59 | **+0.975** | gen 2 winner; knife-edge DTE window (+/-10 -> 0.28/0.07) |
 | 2026-08-29 13:11 | 3 | `robust_diag_v1` | SPY+QQQ+NVDA | +7.0% | 1.13 | 1.01 | -2.3% | +0.6% | 189 | **+1.012** | gen 3: robustness-tuned diagonal, 189 trades |
 | 2026-08-29 13:12 | 3 | `vertical_ivrv_v0` | SPY+QQQ | +6.7% | 1.14 | 1.11 | -1.4% | +0.3% | 104 | **+1.089** | gen 3 winner: re-centred to the 55-70 DTE plateau; DEPLOYED |
+| 2026-08-29 15:20 | 4 | `put_vertical_ivrv` | SPY+QQQ | +6.7% | 1.15 | 1.14 | -1.4% | +0.4% | 102 | **+1.112** | gen 4: require VIX/VXN to confirm the chain-derived vol gate (index-only) |
 
-8 improvements across 12 logged evaluations; score -1.180 -> +1.089, mean Sharpe -0.13 -> 1.14.
+9 improvements across 13 logged evaluations; score -1.180 -> +1.112, mean Sharpe -0.13 -> 1.15.

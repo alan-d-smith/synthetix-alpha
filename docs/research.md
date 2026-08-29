@@ -38,6 +38,23 @@ volatility is rich relative to realised earns Sharpe ≈ 1.0. The monotonicity a
 this is the variance risk premium being harvested conditionally, not a fitted artifact — an independent review of seven
 options papers ranked the same conditional-VRP family first.
 
+## Generation 4: an independent check on the vol gate
+
+Adding CBOE's own indices (VIX from 1990, VXN from 2001, FRED daily closes) served two purposes.
+
+First, **validation**: the chain-derived ATM IV correlates **0.984** with VIX on SPY and **0.985** with VXN on QQQ over
+the backtest window. It sits about 4 vol points lower, exactly as expected — VIX prices the whole strip including the
+OTM put skew, while the chain measure is the at-the-money point. The surface construction is sound.
+
+Second, **an independent replication of the central finding**. Sweeping a VIX-based gate reproduces the same monotonic
+curve on its own scale — score −0.59 at `VIX/RV ≥ 1.0` rising to +1.08 at 1.6 — using a public, market-standard measure
+that never touches the chain code. Two different instruments, same conclusion.
+
+Requiring *both* gates to agree then improved the deployed rule: score 1.089 → **1.112**, fragility median 0.94 → 0.97,
+and out-of-sample on the independent Dolt data 0.177 → **0.202** (Sharpe 0.65 → 0.67). One result cut the other way and
+is worth recording: filtering out high-VIX percentiles ("skip the crisis") *hurt* badly, 1.089 → 0.757. Panic is when
+the premium is richest, and the strategy wants those days.
+
 ## Generation 3: robustness became the objective
 
 Verification of the generation-2 leader exposed a knife-edge: shifting its DTE window ±10 days collapsed the score
@@ -63,13 +80,20 @@ the DTE window, turning its DTE−10 score from unscoreable to +0.86.
 
 Put credit **vertical** on SPY and QQQ — single expiry, so one standard 2-leg `mleg` order:
 
-- **Entry** every 3 days, max 5 concurrent, only when `IV/RV ≥ 1.27`.
+- **Entry** every 3 days, max 5 concurrent, only when **both** vol measures agree the premium is rich: the chain's own
+  `IV/RV ≥ 1.27` *and* the market's index (VIX for SPY, VXN for QQQ) `VIX/RV ≥ 1.4`.
 - **Structure** — sell the 20-delta put, buy the 10-delta put, same expiry, ~65 DTE (40–90 window).
 - **Exits** — take profit at 65% of the credit, stop at 2× credit, close at 21 DTE.
 - **Sizing** — 3% of equity at risk per position against payoff-grid max loss; skip entries whose credit is under
   5% of max loss.
 
-In-sample: mean Sharpe 1.13 (SPY 1.16, QQQ 1.11), max drawdown 1.4%, positive every year including 2022, 104 trades.
+In-sample: mean Sharpe 1.15, max drawdown 1.4%, positive every year including 2022, 102 trades. P&L is well spread —
+the top 5 of 65 SPY trades are only 15% of total profit.
+
+**The double gate is index-only.** `vix_rv_ratio` compares an index's implied vol to that same index's realised vol, so
+it exists for SPY and QQQ and nothing else — dividing VIX by a single stock's realised vol is not a meaningful ratio,
+and the loader deliberately refuses to compute it. For single names use `strategies/put_vertical_ivrv_chainonly.json`,
+the same rule with the chain gate alone.
 
 Alternates kept for regime coverage: `put_diagonal_ivrv_robust.json` (189 trades, adds NVDA) and
 `index_condor_trend.json` (two-sided, index-only — it fails on single names).
@@ -160,16 +184,16 @@ does not exist yet. Until it does, the index pair (SPY/QQQ) is the only validate
 ## Progress log
 
 [`progress.md`](progress.md) is the improvement path: every candidate that beat all its predecessors, with a UTC
-timestamp, return, Sharpe, drawdown and trade count. Eight improvements over about fourteen hours took the search from
+timestamp, return, Sharpe, drawdown and trade count. Nine improvements over about sixteen hours took the search from
 a hand-written baseline that lost money to the deployed rule.
 
-| | baseline | gen 0 | gen 2 | gen 3 (deployed) |
+| | baseline | gen 0 | gen 2 | gen 4 (deployed) |
 |---|---|---|---|---|
-| score | −1.18 | +0.75 | +0.98 | **+1.09** |
+| score | −1.18 | +0.75 | +0.98 | **+1.11** |
 | return | −0.9% | +3.5% | +2.5% | **+6.7%** |
-| mean Sharpe | −0.13 | 0.85 | 1.01 | **1.14** |
+| mean Sharpe | −0.13 | 0.85 | 1.01 | **1.15** |
 | max drawdown | −8.3% | −2.7% | −1.1% | **−1.4%** |
-| trades | 168 | 49 | 59 | **104** |
+| trades | 168 | 49 | 59 | **102** |
 
 Log a new candidate with `python -m synthetix_alpha.strategy.progress <spec.json> --gen N --note "..."`. Non-improving
 runs still go into the append-only `progress.jsonl`; only improvements are rendered into the table.

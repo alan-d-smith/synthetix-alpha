@@ -10,7 +10,7 @@ from typing import Optional, Union
 LEG_TYPES = ("call", "put", "stock")
 SIDES = ("long", "short")
 FEATURES = ("iv_rank", "atm_iv", "rv20", "iv_rv_ratio", "mom20", "sma50_ratio", "sma200_ratio", "skew25",
-            "term_slope", "rsi", "bollinger_pos", "macd")
+            "term_slope", "rsi", "bollinger_pos", "macd", "vix", "vix_rank", "vix_rv_ratio")
 SIZING = ("max_loss", "margin", "notional")
 
 

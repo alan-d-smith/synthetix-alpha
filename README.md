@@ -71,8 +71,9 @@ provenance and hashes in `skills-lock.json`.
 ## Deployed strategy
 
 `strategies/put_vertical_ivrv.json` — put credit vertical on SPY/QQQ (sell 20-delta, buy 10-delta, ~65 DTE), entered
-only when implied vol is rich versus realised (`IV/RV >= 1.27`). In-sample mean Sharpe 1.13, max DD 1.4%, 104 trades;
-Sharpe 0.65 out-of-sample on independent 2019-2026 vendor data and 0.49 on AAPL 2016-2023. See [docs/research.md](docs/research.md) for the search, the verification, and the
+entered only when both the option chain and the matching CBOE index (VIX/VXN) agree implied vol is rich versus
+realised. In-sample mean Sharpe 1.15, max DD 1.4%, 102 trades; Sharpe 0.67 out-of-sample on independent 2019-2026
+vendor data. See [docs/research.md](docs/research.md) for the search, the verification, and the
 deployment caveats.
 
 ```sh
