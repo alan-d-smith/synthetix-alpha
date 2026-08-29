@@ -1,0 +1,1 @@
+# agents package — non-deterministic / LLM-driven research layer (stage 3)

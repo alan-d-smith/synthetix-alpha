@@ -1,0 +1,1 @@
+# engine package — deterministic pipeline stages (2, 4, 5, 6)

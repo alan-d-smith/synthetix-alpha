@@ -1,0 +1,21 @@
+# ============================================================
+# Universe Definition — high-liquidity stocks only
+# ============================================================
+universe:
+  # Minimum average daily dollar volume (price * volume)
+  avg_dollar_volume_floor: 50_000_000   # $50M
+
+  # Minimum market capitalization
+  market_cap_floor: 2_000_000_000       # $2B
+
+  # Minimum price per share (exclude penny stocks)
+  min_price: 5.0
+
+  # Allowed exchanges (empty = all)
+  exchanges: []
+
+  # Ticker allowlist (empty = no filter beyond liquidity)
+  ticker_allowlist: []
+
+  # Ticker denylist (e.g., known illiquid ETFs, leveraged products)
+  ticker_denylist: []

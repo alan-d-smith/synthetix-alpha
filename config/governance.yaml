@@ -1,0 +1,34 @@
+# ============================================================
+# Governance Rules — enforced by critic.py and risk_guard.py
+# ============================================================
+governance:
+  # Maximum account leverage (1.0 = no margin)
+  max_leverage: 1.0
+
+  # Maximum single position as % of portfolio NAV
+  max_single_position_pct: 0.10   # 10%
+
+  # Maximum sector concentration as % of portfolio NAV
+  max_sector_concentration_pct: 0.30  # 30%
+
+  # Maximum number of concurrent open positions
+  max_open_positions: 10
+
+  # Drawdown halts (hard stop — no new orders)
+  max_daily_drawdown_pct: 0.05    # 5% daily
+  max_weekly_drawdown_pct: 0.10   # 10% weekly
+  max_total_drawdown_pct: 0.20    # 20% total drawdown
+
+  # Options constraints
+  options:
+    # Must be defined-risk (verticals, butterflies, etc.)
+    defined_risk_only: true
+    # Maximum premium-at-risk per single options trade (% of NAV)
+    max_premium_at_risk_pct: 0.02   # 2%
+
+  # Required fields present in every signal before sizing
+  required_fields:
+    - ticker
+    - sentiment
+    - confidence_score
+    - thesis

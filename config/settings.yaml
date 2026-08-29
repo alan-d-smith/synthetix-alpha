@@ -1,0 +1,28 @@
+# ============================================================
+# Operational Settings
+# ============================================================
+settings:
+  # Paper trading only — never set to 'live'
+  trading_mode: paper
+
+  # Position monitor polling interval (minutes)
+  position_poll_interval_min: 15
+
+  # Log level: DEBUG, INFO, WARNING, ERROR
+  log_level: INFO
+
+  # Log file path
+  log_file: logs/synthetix-alpha.log
+
+  # LLM configuration
+  llm:
+    provider: deepseek        # deepseek | qwen | openai
+    model: deepseek-ai/DeepSeek-V4-Pro
+    temperature: 0.1
+    max_tokens: 1024
+
+  # Backtest
+  backtest:
+    start_date: "2019-01-01"
+    end_date: "2024-12-31"
+    dolthub_branch: master

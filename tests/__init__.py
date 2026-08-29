@@ -1,0 +1,1 @@
+# tests package — pytest suite for synthetix-alpha
