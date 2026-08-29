@@ -124,6 +124,29 @@ Alternates kept for regime coverage: `put_diagonal_ivrv_robust.json` (189 trades
 - **Single names are the least validated part.** The condor line fails outright on AAPL (score −2.05) and the robust
   diagonal scores −0.75 there; only the vertical holds up out-of-sample on a single name.
 
+## Earnings: the filter that unblocks single names
+
+yfinance supplies announcement dates (AAPL back to 2002) and split history for free, so `days_to_earnings` is now a
+feature. On AAPL — a single name the index rule was never fitted on — it is decisive:
+
+| variant | score | Sharpe | max DD | worst year | trades |
+|---|---|---|---|---|---|
+| no earnings filter | −0.151 | 0.46 | −7.7% | −6.4% | 185 |
+| **no announcement within 30 days** | **+0.838** | **0.90** | **−2.1%** | +0.1% | 78 |
+| only when earnings ≤ 20 days away | −0.597 | 0.11 | −9.1% | −8.9% | 96 |
+
+Two things make this credible where the earlier feature tests were not. The swing is +0.99, roughly twice the 0.54
+Sharpe difference this sample can actually resolve. And the inverse test confirms the mechanism rather than just the
+correlation: deliberately selling premium *into* announcements produces the losses, which is what the earnings-jump
+story predicts.
+
+This is what `strategies/put_vertical_singlename.json` uses, and it removes the blocker on the breadth plan — the
+screener could previously only surface single names it was unsafe to trade.
+
+yfinance also confirms the split problem documented under engine limitations: `spans_split("AAPL", 2016, 2023)`
+returns 2020-08-31, the unadjusted 4:1. Positions held across that date are still mismarked; the accessor exists now,
+the adjustment does not.
+
 ## The liquidity check that changed the headline number
 
 Kaggle's chains carry per-contract volume, which the engine originally discarded. Joining it back to the trade log

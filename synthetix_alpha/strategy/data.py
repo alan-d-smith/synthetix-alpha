@@ -11,7 +11,7 @@ import pandas as pd
 from gs_quant.timeseries.technicals import bollinger_bands, macd, relative_strength_index
 
 from synthetix_alpha import config
-from synthetix_alpha.data import kaggle, vix
+from synthetix_alpha.data import kaggle, vix, yf
 
 COLS = ["expiration", "type", "strike", "bid", "ask", "mid", "iv", "delta", "volume", "underlying_price"]
 CACHE = config.ROOT / "datasets" / "cache" / "engine"
@@ -63,7 +63,17 @@ def features(df: pd.DataFrame, spot: Optional[pd.Series] = None, underlying: Opt
     f["iv_rank"] = f["atm_iv"].rolling(252, min_periods=60).rank(pct=True)
     f["iv_rv_ratio"] = f["atm_iv"] / f["rv20"]
     f["term_slope"] = f["far_iv"] - f["atm_iv"]
-    return f.drop(columns="far_iv").join(technicals(f["spot"])).join(vol_index(underlying, f.index, f["rv20"])).join(underlying_flow(underlying, f.index))
+    return f.drop(columns="far_iv").join(technicals(f["spot"])).join(vol_index(underlying, f.index, f["rv20"])).join(underlying_flow(underlying, f.index)).join(earnings(underlying, f.index))
+
+
+def earnings(underlying: Optional[str], index) -> pd.DataFrame:
+    """Days to the next earnings announcement; empty when unavailable."""
+    if underlying is None:
+        return pd.DataFrame(index=index)
+    try:
+        return yf.days_to_earnings(underlying, index).to_frame()
+    except Exception:
+        return pd.DataFrame(index=index)
 
 
 def underlying_flow(underlying: Optional[str], index) -> pd.DataFrame:

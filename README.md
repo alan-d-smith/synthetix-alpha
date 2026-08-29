@@ -85,4 +85,7 @@ python -m synthetix_alpha.strategy.progress strategies/put_vertical_ivrv.json --
 
 Generation-by-generation results are logged with UTC timestamps in [docs/progress.md](docs/progress.md).
 
+`strategies/put_vertical_singlename.json` applies the same rule to single names, gated on yfinance earnings dates so
+no position is held through an announcement (AAPL: Sharpe 0.46 -> 0.90, max drawdown -7.7% -> -2.1%).
+
 ![Strategy performance](docs/img/put_vertical_ivrv_performance.png)
