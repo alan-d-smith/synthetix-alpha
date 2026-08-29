@@ -50,6 +50,22 @@ surface = dolt.load_chains(["SPY", "QQQ"], dt.date(2023, 1, 1), dt.date(2024, 12
 vol = dolt.load_volatility(["SPY"], dt.date(2023, 1, 1), dt.date(2024, 12, 31))
 ```
 
+## Agentic research loop
+
+New arXiv papers feed the strategy search. The deterministic half (search, relevance filter, PDF download, library of
+papers already seen, backtesting what comes back) lives in `synthetix_alpha/research/`; the reading and spec-writing is
+done by agents via [workflows/paper_research.js](workflows/paper_research.js).
+
+```sh
+python -m synthetix_alpha.research.loop find --limit 5     # queue papers, print the agent brief
+# hand the brief to the workflow, which writes Spec JSON files
+python -m synthetix_alpha.research.loop evaluate           # backtest them against the incumbent
+```
+
+Papers already seen are recorded in [docs/papers.jsonl](docs/papers.jsonl), so repeat runs only surface new work. The
+brief tells the agent that a mean-Sharpe gain under 0.54 is inside this sample's noise, which is the floor measured in
+[docs/research.md](docs/research.md).
+
 ## Live execution and risk gates
 
 `synthetix_alpha/live/` — paper-only order submission and the deterministic gates that sit in front of it.
