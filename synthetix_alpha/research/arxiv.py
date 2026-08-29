@@ -82,18 +82,24 @@ def relevance(paper: dict) -> float:
 
 
 def load_library(path: Path = LIBRARY) -> dict[str, dict]:
+    """Append-only file, last entry per id wins, so a paper's status can be updated by appending."""
     if not path.exists():
         return {}
-    return {r["id"]: r for r in (json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip())}
+    out = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            r = json.loads(line)
+            out[r["id"]] = r
+    return out
 
 
-def record(papers: list[dict], status: str, path: Path = LIBRARY, **extra) -> None:
-    """Append papers to the library so later runs skip them."""
+def record(papers: list[dict], status: str, path: Path = LIBRARY, update: bool = False, **extra) -> None:
+    """Append papers to the library so later runs skip them. Set update to re-record a status change."""
     path.parent.mkdir(parents=True, exist_ok=True)
     seen = load_library(path)
     with path.open("a", encoding="utf-8") as f:
         for p in papers:
-            if p["id"] in seen:
+            if p["id"] in seen and not update:
                 continue
             f.write(json.dumps({"id": p["id"], "title": p["title"], "published": p["published"],
                                 "categories": p["categories"], "pdf_url": p["pdf_url"],

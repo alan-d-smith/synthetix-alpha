@@ -48,6 +48,7 @@ class Spec:
     min_bid: float = 0.05
     min_volume: float = 0.0  # contracts traded that day; ignored where the source has no volume
     source: Optional[str] = None  # provenance, e.g. an arXiv id and title
+    size_scale: Optional[list] = None  # [feature, lo, hi]: risk_fraction scales 0.5x at lo to 1.5x at hi
     min_credit: Optional[float] = None  # credit structures only: skip entries where credit / max_loss < this
 
     def __post_init__(self):
@@ -73,6 +74,11 @@ class Spec:
             raise ValueError("bad sizing / risk_fraction")
         if self.min_credit is not None and not 0 < self.min_credit < 1:
             raise ValueError("min_credit must be in (0, 1)")
+        if self.size_scale is not None:
+            if len(self.size_scale) != 3 or self.size_scale[0] not in FEATURES:
+                raise ValueError("size_scale must be [feature, lo, hi] with a known feature")
+            if not self.size_scale[1] < self.size_scale[2]:
+                raise ValueError("size_scale needs lo < hi")
 
     def to_dict(self) -> dict:
         return asdict(self)

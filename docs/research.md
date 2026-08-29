@@ -299,3 +299,158 @@ python -m synthetix_alpha.strategy.plots  strategies/put_vertical_ivrv.json     
 The plot script writes `docs/img/<spec name>_performance.png` and `<spec name>_research.png`. If you change a spec or
 the engine on a branch, rerun both commands and commit the regenerated PNGs alongside the updated tables here. The gate
 sweep re-runs one backtest per threshold, so it takes a few minutes; pass `--no-sweep` to skip it.
+
+## arXiv intake 2026-08-29
+
+Eight papers were read end to end and translated into the spec DSL where they had a tradable object. Every
+translation was scored against the deployed `put_vertical_ivrv` on the same window, which re-ran identically three
+times during this batch (score **+0.5195**, mean Sharpe 0.9184, 102 trades), so all comparisons below are like-for-like.
+
+**Papers read**
+
+| arXiv | what it is | specs | best score |
+|---|---|---|---|
+| 2608.24786v1 — Harvesting the VRP: Learning-to-Rank | LambdaRank picks 1 of 9 short SPXW 0DTE puts daily | 4 | **0.428** |
+| 2608.20020v1 — The Reconfiguration Premium | eigenspace rotation as an unspanned VRP dimension | 2 | 0.397 |
+| 2608.12493v1 — Beyond the Skew-Stickiness Ratio | transport geometry of spot-driven surface moves | 3 | 0.351 |
+| 2608.22478v1 — Latent-diffusion IV surface forecasting | 30-day surface scenarios vs a persistence benchmark | 3 | 0.132 |
+| 2408.08866v1 — High-Frequency Options Trading | Greek-ranked long/short legs + Markowitz weights | 2 | −0.430 |
+| 2608.22620v1 — WSVI shape family | W-shaped smiles, no-arbitrage structure (no empirics) | 3 | −1.42 |
+| 2603.29430v1 — Ultra-short-term volatility surfaces | Edgeworth++ pricer for 0–7 DTE SPX | 0 | — |
+| 2603.07600v5 — Differential ML for 0DTE | surrogate pricer + Greeks under Bates | 0 | — |
+
+The last two are pure pricing/calibration papers — no trading rule, no P&L, no returns — and were closed without a
+spec rather than dressed up as one.
+
+**Nothing cleared the noise floor, and nothing beat the incumbent.** Seventeen specs ran. The best,
+`shortdte_put_edge` (the paper's 25-delta short put at 1–3 DTE, gated at the incumbent's IV/RV ≥ 1.27), scores 0.428
+with mean Sharpe 0.616 — *below* the deployed +0.520, and its −0.30 Sharpe delta sits inside the 0.54 this sample
+resolves. Eight specs landed inside that noise band (deltas −0.07 to −0.31: `shortdte_put_edge`, `fearsort`, `prepay`,
+`trough_strike`, `atmcore`, `skewgate`, `lowbeta_tenor`, `theta_fly`). Nine were clearly worse:
+
+| spec | score | mean Sharpe | Δ Sharpe | trades |
+|---|---|---|---|---|
+| `wfly_noevent` — near-expiry ATM vol selling, ungated | −5.33 | −0.93 | −1.85 | 1752 |
+| `wfly_long` — long the paper's bimodal density | −3.16 | −0.77 | −1.69 | 149 |
+| `longdated` — incumbent relocated to 180 DTE | −2.39 | −0.84 | −1.76 | 44 |
+| `shortdte_put_midvix` — VIX 15–25 band only | −2.00 | −0.70 | −1.62 | 383 |
+| `wfly` — event-gated W-butterfly | −1.42 | 0.35 | −0.57 | 159 |
+| `shortdte_spread_edge` — 1–3 DTE 25/10Δ put vertical | −1.35 | −0.28 | −1.19 | 200 |
+| `stablecentre` — 40/25Δ at 180 DTE | −1.23 | −0.14 | −1.06 | 52 |
+| `shortdte_put` — ungated 25Δ short put, 1–3 DTE | −1.04 | 0.02 | −0.90 | 756 |
+| `theta_longshort` — put diagonal, 30/75 DTE | −0.73 | 0.12 | −0.80 | 75 |
+
+Three of those are confirmations rather than failures. The ungated 1–3 DTE short put reproduces the learning-to-rank
+paper's own internal baseline (its walk-forward Sharpe −0.019 against our 0.02): short-dated put writing pays only
+conditionally, the same story this document tells at 65 DTE. `wfly_long` is an inverse test and loses 1.69 Sharpe,
+confirming the implied earnings jump is on average over-priced, not under-priced. And skew, VIX-band, surface-region
+and Greek-rank conditioning all failed again, exactly as every prior non-IV/RV conditioning variable has — `skewgate`
+did not even move the metric its thesis targeted (drawdown 1.39%/2.14% against the incumbent's 1.36%/2.00%, having
+removed 30% of the trades).
+
+Two caveats against over-reading the losers. The 180-DTE specs are confounded: that tenor carries far more vega and
+far less theta per day than 65 DTE, so −0.84 and −0.14 are largely negative carry through 2022 rather than a clean
+refutation of the surface-persistence claim. And `prepay` (110 DTE) sits off the documented 55–70 DTE plateau, so its
+weak result is ambiguous between the paper's horizon and the known DTE hole.
+
+One paper's central *empirical* claim did replicate on our data even though it was not tradable: fitting σ(k) on the
+~30 DTE Kaggle slice and regressing Δσ_ATM on S_σ·Δlog F gives β̂ = 1.308 (SPY) and 1.234 (QQQ), R² 0.71, against the
+paper's 1.4375 on SPX. Super-skew is real here. It is a risk decomposition for a hedged book, not an entry signal.
+
+**Engine issues found (recorded, not fixed):**
+
+- **`vix_rank` has lookahead.** `data.vol_index()` computes `s.rank(pct=True)` over the entire 1990–2026 VIX series and
+  then reindexes onto backtest dates, so a 2020 date is ranked against the future. The practical effect is small — VIX's
+  unconditional distribution is stable — but it is a genuine bias. An expanding-window rank is the honest fix.
+- **`vix` is stored in decimals** (0.12–0.83), not index points, and `_in_range` treats an out-of-support gate as simply
+  never firing: a spec written as `vix: [15, 25]` backtested cleanly to 0 trades / score 0.0 with no error. A gate whose
+  range never intersects the feature's observed support should be rejected at validation.
+- **`min_credit` is unusable on any naked short leg** — `max_loss` for a short put is ~the strike, so credit/max_loss is
+  ~0.1% and any floor above zero silently blocks every entry.
+- **`max_loss` is wrong for multi-expiry structures.** Every leg is valued at expiry intrinsic on one spot grid, so a
+  `dte_offset` long leg's remaining time value is ignored and max loss is overstated; sizing then degenerates
+  (`theta_longshort` sized to exactly 1 contract on 40 of 40 SPY trades).
+- **Percent-of-premium exits are meaningless for premium-neutral structures.** That diagonal had median `|entry_value|`
+  $1.47 and a minimum of $0.018/share, so 34 of 40 exits tagged "profit" were noise against a tiny denominator.
+- `_pick_expiration` shifts the whole DTE window by each leg's offset, so a 3-tenor structure can silently pick the same
+  expiry twice; and the `min_volume` filter falls back to an empty frame when nothing on the target expiry clears it,
+  which is why the 180-DTE specs got 44–52 trades against the incumbent's 102 — close to the 40-trade scoring cliff.
+
+**Missing primitives worth building next, ranked by value over effort:**
+
+1. **Signal-conditional position size.** `risk_fraction` is a single constant. Every sizing rule the strongest paper
+   cares about (Edge Allocation on the training-CDF percentile of (IV−RV)/RV, short-richness scaling, fractional Kelly)
+   is size-as-a-function-of-a-feature. We already know the IV/RV gate is the entire edge; scaling size along it instead
+   of binarising it is the cheapest untested amplification of the one thing that works.
+2. **Expanding-window feature ranks, plus a unit/support check in `Spec.validate()`.** Half a day. Removes a real
+   lookahead bias and a whole class of silent zero-trade specs.
+3. **Per-contract gamma, vega and theta in `data.COLS`.** Three papers needed them and had to be proxied by strike and
+   DTE. Unlocks vega-neutral and theta-targeted structures and Greek-matched leg ratios; the Kaggle chains carry them.
+4. **A macro-event calendar (`days_to_event`: FOMC, CPI, NFP) mirroring `days_to_earnings`.** Earnings avoidance is the
+   single largest proven effect in this document (+0.99 on AAPL), and there is no index analogue — SPY/QQQ, the only
+   validated pair, currently cannot express the one filter that clearly works.
+5. **Cross-sectional candidate ranking**: score N candidate structures per day, take the argmax, allow an explicit SKIP.
+   This is the actual contribution of two of the papers, and it is the same primitive the breadth plan needs for the
+   1,522-name Dolt scan. Higher effort — it changes `Spec` from one fixed structure into a candidate set.
+6. **Per-slice smile fit in forward moneyness** — a forward `F`, a discount curve, and a curvature ("W-ness") feature.
+   Three papers are written entirely in `k = ln(K/F)`; the engine has strike/spot and two hardcoded surface probes.
+   Medium effort; unlocks strike selection by fitted-vs-quoted residual.
+7. **Short-horizon vol pair** (5-day RV, shortest-tenor ATM IV) to complement the 30-day `iv_rv_ratio`. Cheap, but note
+   the Dolt OOS surface has zero rows under 7 DTE, so short-tenor candidates could never be verified off-sample.
+8. **Intraday marks and a delta-hedging loop.** Required by four of the eight papers and by any transport or
+   hedged-book result — but it is a rewrite of the engine's core loop and the data does not exist here. Lowest priority.
+
+**Process notes.** `pypdf` was not installed and was added to the venv (no repo code touched). The session scratchpad is
+shared across concurrently running paper agents: two agents independently read back a *different* paper's text from a
+colliding `paper.txt`. Parallel paper runs must use unique scratchpad filenames and should check the PDF's `/Title`
+metadata before trusting extracted text.
+
+## arXiv intake, 2026-08-29
+
+The research loop read eight papers and produced 26 testable specs. **None beat the incumbent.** The best scored
++0.428 against the deployed +0.520, and every candidate above +0.28 sat inside the 0.54 noise floor. Recording it
+because a loop that only reports wins is not measuring anything.
+
+| paper | best derived spec | score | Sharpe | verdict |
+|---|---|---|---|---|
+| [2608.24786](https://arxiv.org/abs/2608.24786) Harvesting the Volatility Risk Premium (Wysocki) | short-dated put, IV/RV gated | +0.428 | 0.62 | within noise |
+| [2608.20020](https://arxiv.org/abs/2608.20020) The Reconfiguration Premium (Carvalho) | incumbent + `vix_rank >= 0.5` | +0.397 | 0.84 | within noise |
+| [2608.12493](https://arxiv.org/abs/2608.12493) Beyond the Skew-Stickiness Ratio (Che & Das) | strikes at the velocity trough | +0.351 | 0.78 | within noise |
+| [2608.20020](https://arxiv.org/abs/2608.20020) The Reconfiguration Premium | 110-DTE prepayment horizon | +0.334 | 0.85 | within noise |
+| [2608.22478](https://arxiv.org/abs/2608.22478) Arbitrage-Aware IV Surface Forecasting | ATM-core variant | +0.132 | 0.76 | worse |
+| [2608.22620](https://arxiv.org/abs/2608.22620) WSVI (Dimensionless Shape Family) | event butterfly | −1.42 | 0.35 | worse |
+| [2603.07600](https://arxiv.org/abs/2603.07600) Differential ML for 0DTE | — | — | — | not expressible |
+| [2603.29430](https://arxiv.org/abs/2603.29430) Ultra-short-term volatility surfaces | — | — | — | not expressible |
+| [2408.08866](https://arxiv.org/abs/2408.08866) High-Frequency Options Trading | — | — | — | not expressible |
+
+Seven of the eight were judged not expressible in this engine, for consistent reasons: they need intraday rebalancing,
+a dynamic delta hedge, cross-sectional ranking inside a chain, or a calibrated surface. Those are design boundaries,
+not oversights.
+
+Three things came out of it that are worth keeping.
+
+**Independent corroboration of the gate.** Wysocki's sizing variable, "Edge Allocation", is (IV − RV)/RV — the same
+quantity this project's entry gate uses, arrived at from a completely different direction (a LambdaRank ranker over
+0DTE SPXW puts). Two independent searches landing on the same conditioning variable is the strongest evidence so far
+that the gate is a real effect rather than a fit.
+
+**A new engine capability, and a negative result for it.** The most-cited missing primitive across the papers was
+signal-conditional position sizing — Wysocki sizes proportionally to the edge rather than gating on it. That is now
+implemented as `Spec.size_scale = [feature, lo, hi]`, scaling the risk budget from 0.5x to 1.5x across the feature's
+range. Tested faithfully, it does not help here:
+
+| sizing | score | change |
+|---|---|---|
+| flat 3% risk (incumbent) | +0.520 | — |
+| Edge Allocation on `iv_rv_ratio` 1.27→1.60 | +0.488 | −0.031 |
+| Edge Allocation on `iv_rv_ratio` 1.27→1.80 | +0.421 | −0.099 |
+| scaled on `vix_rv_ratio` 1.40→2.00 | +0.525 | +0.005 |
+
+The capability stays because it is correct and cheap; the deployed spec does not use it.
+
+**A ranked list of what to build next**, from the papers' own missing-primitive reports: cross-sectional ranking within
+a chain (named by two papers), per-contract greeks beyond delta (already in the data, still unused), forward moneyness
+`log(K/F)` rather than `strike/spot − 1`, and per-tenor ATM vol for maturities under 15 days.
+
+Every spec carries its origin in `Spec.source` as `arXiv:<id> <title>`, so any result stays traceable to the paper it
+came from. Papers already read are recorded in `docs/papers.jsonl`.
