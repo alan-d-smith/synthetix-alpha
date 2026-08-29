@@ -522,3 +522,33 @@ The honest conclusion after five faithful tests is unchanged from the power anal
 holding periods this sample cannot resolve the size of effect these papers offer. The loop is working — it is
 rejecting things that deserve rejection. Finding a real attributable improvement needs more option-chain history far
 more than it needs more papers.
+
+## The improvement that did survive: combining sleeves
+
+After five paper ideas were rejected as signals, the one that worked was not a signal at all. The first paper
+synthesis flagged a missing primitive drawn from Lillo, Mazzarisi & Tsaknaki, *Tackling estimation risk in Kelly
+investing using options*, whose combination theorem needs a way to run several strategies as sleeves of one account
+and score the blend. That primitive did not exist, so the idea was never testable. It is now `backtest_combo`.
+
+Two sleeves had been validated separately and never run together:
+
+| | Sharpe | max drawdown |
+|---|---|---|
+| index sleeve (`put_vertical_ivrv`, SPY+QQQ) | 0.98 | — |
+| single-name sleeve (`put_vertical_singlename`, AAPL) | 0.88 | — |
+| **50/50 blend** | **1.15** | **−1.14%** |
+
+Measured on the 2020-2022 overlap only, so this is not an artifact of the sleeves covering different periods. Sleeve
+correlation is **0.335**.
+
+**Why this one is trustworthy where the signal tests were not.** The diversification identity predicts a blended
+Sharpe of `(0.5·0.98 + 0.5·0.88) / sqrt(0.5 + 0.5·0.335) = 1.138`. The measured value is 1.15 — a difference of 0.012.
+The gain is arithmetic, a consequence of combining two imperfectly correlated return streams, not an effect inferred
+from a small sample. That is why it does not have to clear the 0.54 noise floor: no new signal is being claimed. It is
+also flat in the weighting (1.13 / 1.15 / 1.14 at 40/50/60% index), so there is no knife-edge parameter.
+
+One implementation detail decided the result. Splitting $100k across sleeves made the blend look *worse* than either
+sleeve, because at $50k the integer contract rounding changes which trades happen at all. Sleeves must be run on full
+capital and combined at the **return** level. The first version got this wrong and reported a Sharpe of −0.01.
+
+Deployed as `strategies/portfolio.json`; run it with the same CLI as any spec.

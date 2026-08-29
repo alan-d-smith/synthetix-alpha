@@ -91,3 +91,30 @@ def test_days_since_shock_is_lookahead_free():
     d = days_since_shock(spot, rv, k=3.0)
     assert d.iloc[4] == 0 and d.iloc[5] == 1 and d.iloc[7] == 3
     assert np.isnan(d.iloc[0])  # nothing before the first shock
+
+
+def test_backtest_combo_blends_returns_not_capital(monkeypatch):
+    import pandas as pd
+    import synthetix_alpha.strategy.engine as eng
+    import synthetix_alpha.strategy.run as runmod
+
+    idx = pd.date_range("2021-01-01", periods=60, freq="D")
+    curves = {"A": pd.Series((100_000 * 1.001 ** pd.Series(range(60))).to_numpy(), index=idx),
+              "B": pd.Series((100_000 * 1.002 ** pd.Series(range(60))).to_numpy(), index=idx)}
+    seen = []
+
+    class FakeResult:
+        def __init__(self, eq):
+            self.equity, self.metrics = eq, {"n_trades": 10}
+
+    def fake_run(spec, data, equity0):
+        seen.append(equity0)
+        return FakeResult(curves[spec.name])
+
+    monkeypatch.setattr(eng, "run", fake_run)
+    monkeypatch.setattr(runmod.EngineData, "load", staticmethod(lambda *a, **k: object()))
+    a = Spec("A", legs=[{"type": "put", "side": "short", "delta": 0.3}], underlyings=["X"])
+    b = Spec("B", legs=[{"type": "put", "side": "short", "delta": 0.3}], underlyings=["X"])
+    out = runmod.backtest_combo([a, b], weights=[0.5, 0.5], equity0=100_000.0)
+    assert seen == [100_000.0, 100_000.0]  # each sleeve keeps full capital, so contract rounding is unchanged
+    assert out["summary"]["total_trades"] == 20 and out["combined"]["total_return"] > 0

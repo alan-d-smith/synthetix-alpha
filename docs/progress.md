@@ -22,5 +22,6 @@ scoring -9. Return is the mean across the underlyings traded, each on its own $1
 | 2026-08-29 15:20 | 4 | `put_vertical_ivrv` | SPY+QQQ | +6.7% | 1.15 | 1.14 | -1.4% | +0.4% | 102 | **+1.112** | gen 4: require VIX/VXN to confirm the chain-derived vol gate (index-only) |
 | 2026-08-29 16:59 | 4 | `put_vertical_ivrv` | SPY+QQQ | +5.7% | 0.92 | 0.70 | -2.0% | -1.5% | 102 | **+0.520** | !! liquidity floor: require 25 contracts traded that day. 9.8% of earlier fills were in contracts with ZERO volume; the in-sample/OOS gap narrowed 1.15/0.67 -> 0.92/0.67 |
 | 2026-08-29 17:26 | 5 | `put_vertical_singlename` | AAPL | +14.4% | 0.90 | 0.90 | -2.1% | +0.1% | 78 | **+0.838** | single-name variant: yfinance earnings filter (no announcement within 30d). AAPL score -0.151 -> +0.838, Sharpe 0.46 -> 0.90, maxDD -7.7% -> -2.1% |
+| 2026-08-29 19:42 | 7 | `portfolio_index_plus_singlename` | SPY+QQQ+AAPL | +7.1% | 1.15 | 1.15 | -1.1% | +0.1% | 180 | **+1.176** | combine the index and single-name sleeves (corr 0.335); primitive from arXiv Lillo et al., Kelly investing using options |
 
-11 improvements across 15 logged evaluations; score -1.180 -> +0.838, mean Sharpe -0.13 -> 0.90.
+12 improvements across 16 logged evaluations; score -1.180 -> +1.176, mean Sharpe -0.13 -> 1.15.

@@ -99,6 +99,13 @@ python -m synthetix_alpha.strategy.plots strategies/put_vertical_ivrv.json    # 
 python -m synthetix_alpha.strategy.progress strategies/put_vertical_ivrv.json --gen 3   # append to docs/progress.md
 ```
 
+`strategies/portfolio.json` runs the index and single-name sleeves together. Their returns correlate 0.335, so the
+blend has a higher Sharpe (1.15) than either sleeve alone (0.98, 0.88) with a smaller drawdown.
+
+```sh
+python -m synthetix_alpha.strategy.run strategies/portfolio.json
+```
+
 Generation-by-generation results are logged with UTC timestamps in [docs/progress.md](docs/progress.md).
 
 `strategies/put_vertical_singlename.json` applies the same rule to single names, gated on yfinance earnings dates so

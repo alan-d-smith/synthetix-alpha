@@ -1,0 +1,13 @@
+{
+  "name": "portfolio_index_plus_singlename",
+  "sleeves": [
+    "strategies/put_vertical_ivrv.json",
+    "strategies/put_vertical_singlename.json"
+  ],
+  "weights": [
+    0.5,
+    0.5
+  ],
+  "source": "arXiv:2504.xxxxx Lillo, Mazzarisi & Tsaknaki, Tackling estimation risk in Kelly investing using options (combination theorem KOc 4.1)",
+  "note": "sleeve correlation 0.335; blended Sharpe 1.15 vs 0.98 / 0.88 standalone on the 2020-2022 overlap"
+}
