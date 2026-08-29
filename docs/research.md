@@ -576,9 +576,19 @@ naive equal weight by 0.007 of Sharpe, far less than the error in estimating the
 the paper the combination primitive came from — estimation risk in Kelly weighting — so the portfolio takes the naive
 weights and carries no fitted parameter.
 
-As deployed over the full period the portfolio has Sharpe 1.109 and a −0.83% drawdown, positive in every year. The
-full-period figure is lower than the overlap figure because 2016-2019 has only the single-name sleeve running and
-therefore no diversification to collect.
+As deployed over the full period the portfolio has **Sharpe 0.975**, a **−2.12%** drawdown and **+14.3%** total
+return, positive in every year. The full-period figure is lower than the overlap figure because 2016-2019 has only the
+single-name sleeve running and therefore no diversification to collect.
+
+That paragraph originally read 1.109 and −0.83%, which was wrong. `backtest_combo` filled a sleeve's missing days with
+a 0% return, so a sleeve that did not exist yet was scored as one sitting flat in cash — it damped the blend's
+volatility without ever losing, flattering both the Sharpe and the drawdown of any portfolio whose sleeves had
+different histories. Weights are now renormalised each day onto the live sleeves. Every number measured *on the
+overlap* is unaffected, because all three sleeves are live there and the renormalisation is a no-op — the two identity
+checks above still hold. What changes is the full-period claim, and it changes twice: the three-sleeve portfolio adds
+roughly 0.001 of Sharpe over two sleeves on the full period rather than the 1.15 → 1.34 the overlap shows, because the
+bear-call sleeve only trades in a narrow window. The diversification is real where it is measured; it is only
+collected for part of the record.
 
 `strategies/portfolio.json`, three sleeves, equal weight.
 
