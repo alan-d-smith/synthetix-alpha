@@ -159,19 +159,20 @@ does not exist yet. Until it does, the index pair (SPY/QQQ) is the only validate
 
 ## Progress log
 
-[`progress.md`](progress.md) records every candidate promoted out of a generation with a UTC timestamp, so the
-improvement is auditable rather than asserted. The headline: the hand-written baseline scored **−1.18**; three
-generations later the deployed rule scores **+1.09**.
+[`progress.md`](progress.md) is the improvement path: every candidate that beat all its predecessors, with a UTC
+timestamp, return, Sharpe, drawdown and trade count. Eight improvements over about fourteen hours took the search from
+a hand-written baseline that lost money to the deployed rule.
 
-| | baseline | gen 0 | gen 2 | gen 3 |
+| | baseline | gen 0 | gen 2 | gen 3 (deployed) |
 |---|---|---|---|---|
 | score | −1.18 | +0.75 | +0.98 | **+1.09** |
-| mean Sharpe | −0.13 | 0.85 | 1.01 | **1.13** |
+| return | −0.9% | +3.5% | +2.5% | **+6.7%** |
+| mean Sharpe | −0.13 | 0.85 | 1.01 | **1.14** |
 | max drawdown | −8.3% | −2.7% | −1.1% | **−1.4%** |
 | trades | 168 | 49 | 59 | **104** |
 
-Log a new candidate with `python -m synthetix_alpha.strategy.progress <spec.json> --gen N --note "..."`. The JSONL
-behind it is append-only, so a later run cannot rewrite earlier history.
+Log a new candidate with `python -m synthetix_alpha.strategy.progress <spec.json> --gen N --note "..."`. Non-improving
+runs still go into the append-only `progress.jsonl`; only improvements are rendered into the table.
 
 ## Regenerating the figures
 

@@ -1,4 +1,4 @@
-"""Append-only log of every evaluated strategy. JSONL is the source of truth; the table is rendered from it."""
+"""Append-only log of evaluated strategies. JSONL is the source of truth; the table renders only the improvements."""
 
 from __future__ import annotations
 
@@ -14,8 +14,20 @@ from synthetix_alpha.strategy.verify import score
 
 LOG = Path("docs/progress.jsonl")
 TABLE = Path("docs/progress.md")
-COLUMNS = ["evaluated_utc", "gen", "strategy", "underlyings", "total_return", "mean_sharpe", "min_sharpe",
-           "worst_drawdown", "worst_year", "trades", "score"]
+
+HEADER = """# Strategy progress log
+
+Each row beat every candidate evaluated before it, so this is the improvement path of the search rather than a list of
+everything tried. Appended by `python -m synthetix_alpha.strategy.progress <spec.json> --gen N`; the full history,
+including evaluations that did not improve, stays in the append-only `progress.jsonl` beside this file.
+
+Score is the search's selection score:
+`0.5*mean_sharpe + 0.5*min_sharpe + 2*worst_year + 3*max(maxDD, -1) + (positive_years - 1)`, with fewer than 40 trades
+scoring -9. Return is the mean across the underlyings traded, each on its own $100k.
+
+| evaluated (UTC) | gen | strategy | underlyings | return | mean Sharpe | min Sharpe | max DD | worst year | trades | score | what changed |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+"""
 
 
 def entry(spec: Spec, results: dict, gen: int, note: str = "", when: Optional[dt.datetime] = None,
@@ -40,49 +52,40 @@ def append(rows: list[dict], log: Path = LOG) -> None:
 def load(log: Path = LOG) -> list[dict]:
     if not log.exists():
         return []
-    return [json.loads(l) for l in log.read_text(encoding="utf-8").splitlines() if l.strip()]
+    return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def improvements(rows: list[dict]) -> list[dict]:
+    """Rows that beat every earlier score, in evaluation order."""
+    best, out = None, []
+    for r in sorted(rows, key=lambda r: (r["evaluated_utc"], r["strategy"])):
+        if best is None or r["score"] > best:
+            best, _ = r["score"], out.append(r)
+    return out
 
 
 def render(log: Path = LOG, table: Path = TABLE) -> Path:
-    rows = sorted(load(log), key=lambda r: (r["evaluated_utc"], r["strategy"]))
-    best, progression = None, []
-    for r in rows:
-        if best is None or r["score"] > best["score"]:
-            best = r
-            progression.append(r)
-    head = ("# Strategy progress log\n\n"
-            "Every candidate promoted out of a generation, in evaluation order. Appended by\n"
-            "`python -m synthetix_alpha.strategy.progress <spec.json> --gen N`; the table is rendered from\n"
-            "`progress.jsonl`, which is append-only, so history cannot be rewritten by a later run.\n\n"
-            "Score is the selection score used by the search: "
-            "`0.5·mean_sharpe + 0.5·min_sharpe + 2·worst_year + 3·max(maxDD,−1) + (positive_years−1)`, "
-            "with fewer than 40 trades scoring −9. Returns are the mean across the underlyings traded, each on its "
-            "own $100k.\n\n")
-    if progression:
-        head += "## Best score over time\n\n| evaluated (UTC) | gen | strategy | score |\n|---|---|---|---|\n"
-        for r in progression:
-            head += f"| {r['evaluated_utc']} | {r['gen']} | `{r['strategy']}` | **{r['score']:+.3f}** |\n"
-        head += "\n"
-    head += ("## All evaluations\n\n| evaluated (UTC) | gen | strategy | underlyings | return | mean Sharpe | "
-             "min Sharpe | max DD | worst year | trades | score | note |\n"
-             "|---|---|---|---|---|---|---|---|---|---|---|---|\n")
-    for r in rows:
-        head += (f"| {r['evaluated_utc']} | {r['gen']} | `{r['strategy']}` | {r['underlyings']} | "
-                 f"{r['total_return']:+.1%} | {r['mean_sharpe']:.2f} | {r['min_sharpe']:.2f} | "
-                 f"{r['worst_drawdown']:.1%} | {r['worst_year']:+.1%} | {r['trades']} | {r['score']:+.3f} | "
-                 f"{r.get('note', '')} |\n")
+    rows = load(log)
+    kept = improvements(rows)
+    md = HEADER + "".join(
+        f"| {r['evaluated_utc']} | {r['gen']} | `{r['strategy']}` | {r['underlyings']} | {r['total_return']:+.1%} | "
+        f"{r['mean_sharpe']:.2f} | {r['min_sharpe']:.2f} | {r['worst_drawdown']:.1%} | {r['worst_year']:+.1%} | "
+        f"{r['trades']} | **{r['score']:+.3f}** | {r.get('note', '')} |\n" for r in kept)
+    if kept:
+        md += (f"\n{len(kept)} improvements across {len(rows)} logged evaluations; "
+               f"score {kept[0]['score']:+.3f} -> {kept[-1]['score']:+.3f}, "
+               f"mean Sharpe {kept[0]['mean_sharpe']:.2f} -> {kept[-1]['mean_sharpe']:.2f}.\n")
     table.parent.mkdir(parents=True, exist_ok=True)
-    table.write_text(head, encoding="utf-8")
+    table.write_text(md, encoding="utf-8")
     return table
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("spec", nargs="?", help="spec to evaluate and log; omit with --render to rebuild the table")
+    ap.add_argument("spec", nargs="?", help="spec to evaluate and log; omit to only re-render the table")
     ap.add_argument("--gen", type=int, default=0)
     ap.add_argument("--note", default="")
     ap.add_argument("--source", default="kaggle", choices=["kaggle", "dolt"])
-    ap.add_argument("--render", action="store_true", help="only re-render the table from the log")
     a = ap.parse_args()
     if a.spec:
         spec = Spec.load(a.spec)

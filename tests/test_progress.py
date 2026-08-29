@@ -26,16 +26,17 @@ def test_log_is_append_only_and_renders(tmp_path):
     progress.append([progress.entry(SPEC, worse, 2, "worse", dt.datetime(2026, 9, 2, tzinfo=dt.timezone.utc))], log)
     assert len(progress.load(log)) == 2  # nothing overwritten
     md = progress.render(log, table).read_text(encoding="utf-8")
-    assert md.count("| 2026-09-0") == 3  # 2 rows in the table + 1 in the best-over-time section
-    assert "worse" in md and "first" in md
+    assert "first" in md and "worse" not in md  # only improvements are rendered
+    assert "1 improvements across 2 logged evaluations" in md
 
 
-def test_best_over_time_only_records_improvements(tmp_path):
+def test_only_improvements_are_rendered(tmp_path):
     log, table = tmp_path / "p.jsonl", tmp_path / "p.md"
     rows = []
     for i, sharpe in enumerate([0.2, 0.1, 0.9]):  # middle entry is a regression
         r = {**RESULTS, "summary": {**RESULTS["summary"], "mean_sharpe": sharpe, "min_sharpe": sharpe}}
         rows.append(progress.entry(SPEC, r, i, "", dt.datetime(2026, 9, i + 1, tzinfo=dt.timezone.utc)))
     progress.append(rows, log)
-    best = progress.render(log, table).read_text(encoding="utf-8").split("## All evaluations")[0]
-    assert "2026-09-01" in best and "2026-09-03" in best and "2026-09-02" not in best
+    md = progress.render(log, table).read_text(encoding="utf-8")
+    assert "2026-09-01" in md and "2026-09-03" in md and "2026-09-02" not in md
+    assert len(progress.load(log)) == 3  # the regression is kept in the log, just not rendered
