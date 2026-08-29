@@ -1,3 +1,4 @@
 [submodule "external/gs-quant"]
 	path = external/gs-quant
 	url = https://github.com/goldmansachs/gs-quant
+	ignore = untracked
