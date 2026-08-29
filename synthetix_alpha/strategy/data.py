@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -15,6 +16,7 @@ from synthetix_alpha.data import kaggle, vix
 COLS = ["expiration", "type", "strike", "bid", "ask", "mid", "iv", "delta", "underlying_price"]
 CACHE = config.ROOT / "datasets" / "cache" / "engine"
 DOLT_START = dt.date(2019, 2, 9)
+NY = ZoneInfo("America/New_York")
 
 
 def build(underlying: str, source: str = "kaggle") -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -61,7 +63,24 @@ def features(df: pd.DataFrame, spot: Optional[pd.Series] = None, underlying: Opt
     f["iv_rank"] = f["atm_iv"].rolling(252, min_periods=60).rank(pct=True)
     f["iv_rv_ratio"] = f["atm_iv"] / f["rv20"]
     f["term_slope"] = f["far_iv"] - f["atm_iv"]
-    return f.drop(columns="far_iv").join(technicals(f["spot"])).join(vol_index(underlying, f.index, f["rv20"]))
+    return f.drop(columns="far_iv").join(technicals(f["spot"])).join(vol_index(underlying, f.index, f["rv20"])).join(underlying_flow(underlying, f.index))
+
+
+def underlying_flow(underlying: Optional[str], index) -> pd.DataFrame:
+    """Relative volume and VWAP deviation from Alpaca daily bars; empty if the data is unavailable."""
+    if underlying is None:
+        return pd.DataFrame(index=index)
+    try:
+        from synthetix_alpha.data.alpaca import AlpacaClient
+        bars = AlpacaClient().stock_bars(underlying, "1Day", min(index) - dt.timedelta(days=60), max(index))
+    except Exception:
+        return pd.DataFrame(index=index)
+    if bars.empty:
+        return pd.DataFrame(index=index)
+    bars = bars.set_index(bars.index.tz_convert(NY).date)
+    vol, close, vwap = bars["volume"], bars["close"], bars["vwap"]
+    return pd.DataFrame({"rvol": (vol / vol.rolling(20).mean()).reindex(index),
+                         "vwap_dev": ((close - vwap) / vwap).reindex(index)}, index=index)
 
 
 def vol_index(underlying: Optional[str], index, rv20: pd.Series) -> pd.DataFrame:

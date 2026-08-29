@@ -124,6 +124,41 @@ Alternates kept for regime coverage: `put_diagonal_ivrv_robust.json` (189 trades
 - **Single names are the least validated part.** The condor line fails outright on AAPL (score −2.05) and the robust
   diagonal scores −0.75 there; only the vertical holds up out-of-sample on a single name.
 
+## Do technical indicators help? Tested, and mostly no
+
+RSI, Bollinger position, MACD (all from `gs_quant.timeseries.technicals`), momentum, trend ratios, relative volume and
+VWAP deviation are all available as features. Adding each as an extra entry gate on the deployed rule:
+
+| added gate | score change |
+|---|---|
+| `rsi <= 70` / `rsi 30-70` | −0.001 / −0.014 |
+| `bollinger_pos <= 0.8` / `>= 0.2` | −0.097 / −0.271 |
+| `macd >= 0` (uptrend) | −0.240 |
+| `mom20 >= 0` | −0.296 |
+| `sma50_ratio >= 0` | −0.523 |
+| `sma200_ratio >= 0` (bull market only) | **−1.020** |
+| `macd <= 0` (downtrend) | −10.1 (falls below the trade floor) |
+
+**Not one directional filter helps.** The reason is structural: the edge is a variance risk premium, which is a
+volatility phenomenon, so filtering by price direction removes trades at random with respect to the actual edge and
+just shrinks the sample. `sma200_ratio >= 0` is the sharpest illustration — restricting a put spread to bull markets
+costs a full point of score, because the premium is richest precisely when the tape is not calm. The same logic showed
+up in the VIX work: excluding high-VIX percentiles also hurt.
+
+Two microstructure filters did look different, because they condition on *disturbance* rather than *direction*:
+`rvol <= 1.5` (+0.067, monotone across thresholds) and `|vwap_dev| <= 0.005` (+0.121) — both saying "trade on calm,
+orderly sessions". Combined they gave +1.120 in sample against the deployed +1.112.
+
+**They did not survive out-of-sample and were rejected.** On the independent Dolt data the calm-filtered variant scores
+0.017 with Sharpe 0.48, against the deployed rule's 0.202 and Sharpe 0.67. Around 28 variants were tried against the
+same in-sample window, so the best few were always likely to be noise; this is what that looks like when you check.
+The features stay in the codebase for future generations to use, but the deployed spec does not use them.
+
+One caveat in the other direction: on the much shorter-horizon `index_condor_trend` (11-33 DTE, held at most 10 days),
+`mom20 >= 0` was worth +0.174 and `macd >= 0` +0.079. Horizon plausibly matters, and a directional filter may earn its
+place on a short-dated structure. That result is unverified out-of-sample and the condor already fails on single names,
+so it is a lead rather than a finding.
+
 ## Deployment risk the search did not optimise for
 
 The fitness function rewarded risk-adjusted return over three years. It never asked **"will this trade this week?"**
