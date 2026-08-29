@@ -1,0 +1,71 @@
+{
+  "name": "index_condor_trend",
+  "legs": [
+    {
+      "type": "put",
+      "side": "short",
+      "delta": 0.16,
+      "moneyness": null,
+      "width": null,
+      "dte_offset": 0,
+      "ratio": 1
+    },
+    {
+      "type": "put",
+      "side": "long",
+      "delta": 0.07,
+      "moneyness": null,
+      "width": null,
+      "dte_offset": 0,
+      "ratio": 1
+    },
+    {
+      "type": "call",
+      "side": "short",
+      "delta": 0.12,
+      "moneyness": null,
+      "width": null,
+      "dte_offset": 0,
+      "ratio": 1
+    },
+    {
+      "type": "call",
+      "side": "long",
+      "delta": 0.06,
+      "moneyness": null,
+      "width": null,
+      "dte_offset": 0,
+      "ratio": 1
+    }
+  ],
+  "underlyings": [
+    "SPY",
+    "QQQ"
+  ],
+  "dte_target": 21,
+  "dte_min": 11,
+  "dte_max": 33,
+  "entry_every_days": 3,
+  "max_positions": 4,
+  "signal": {
+    "sma50_ratio": [
+      0.005,
+      0.1
+    ],
+    "term_slope": [
+      null,
+      0.02
+    ]
+  },
+  "profit_target": 0.4,
+  "stop_loss": 1.0,
+  "dte_exit": 3,
+  "max_hold_days": 10,
+  "risk_fraction": 0.03,
+  "sizing": "max_loss",
+  "max_contracts": 100,
+  "commission": 0.65,
+  "slippage": 0.5,
+  "min_bid": 0.05,
+  "min_credit": null
+}

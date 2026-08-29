@@ -65,12 +65,12 @@ submit(legs, contracts, limit_price)                      # dry-run by default; 
 
 ## Deployed strategy
 
-`strategies/put_diagonal_ivrv.json` — put credit diagonal on SPY/QQQ, entered only when implied vol is rich versus
-realised (`IV/RV >= 1.25`). In-sample mean Sharpe 1.01, max DD 1.1%; Sharpe 0.84 out-of-sample on independent
-2019-2026 vendor data. See [docs/research.md](docs/research.md) for the search, the verification, and the
+`strategies/put_vertical_ivrv.json` — put credit vertical on SPY/QQQ (sell 20-delta, buy 10-delta, ~65 DTE), entered
+only when implied vol is rich versus realised (`IV/RV >= 1.27`). In-sample mean Sharpe 1.13, max DD 1.4%, 104 trades;
+Sharpe 0.65 out-of-sample on independent 2019-2026 vendor data and 0.49 on AAPL 2016-2023. See [docs/research.md](docs/research.md) for the search, the verification, and the
 deployment caveats.
 
 ```sh
-python -m synthetix_alpha.strategy.run strategies/put_diagonal_ivrv.json        # backtest
-python -m synthetix_alpha.strategy.verify strategies/put_diagonal_ivrv.json --oos AAPL --dolt SPY
+python -m synthetix_alpha.strategy.run strategies/put_vertical_ivrv.json        # backtest
+python -m synthetix_alpha.strategy.verify strategies/put_vertical_ivrv.json --oos AAPL --dolt SPY
 ```
