@@ -61,7 +61,12 @@ decision = apply(orders, positions, nav, Rules.load())   # defined-risk only, pe
 submit(legs, contracts, limit_price)                      # dry-run by default; deterministic client_order_id = no double-fills
 ```
 
-`.agents/skills/` holds Alpaca API reference skills (trading, market data, paper CLI/MCP, broker flows).
+`synthetix_alpha/live/screen.py` scans the ~1,500-name DoltHub vol history for underlyings whose implied vol is rich
+versus realised, applying the liquidity floors in [config/universe.yaml](config/universe.yaml). Note the open caveat in
+the research doc: it has no earnings filter yet, so its single-name output is not safe to trade unattended.
+
+`.agents/skills/` holds Alpaca API reference skills (trading, market data, paper CLI/MCP, broker flows), with
+provenance and hashes in `skills-lock.json`.
 
 ## Deployed strategy
 

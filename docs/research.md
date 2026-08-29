@@ -104,15 +104,30 @@ Deployed on SPY alone over a handful of trading days, the most likely outcome is
 
 The fix is **breadth, not a weaker gate** — loosening the gate is exactly where the edge disappears. A cross-sectional
 scan of the 1,522-name Dolt universe found **222 names (15%) above IV/RV ≥ 1.25** on the same date SPY was below it.
-Caveat: extreme single-name IV/RV usually prices a scheduled event (earnings, M&A, FDA), and selling that premium is
-the classic trap — so any breadth basket must be liquidity- and event-filtered, and single-name performance is the
-least validated part of this work.
+
+**The edge does generalise across names.** Running the same rule over ten large caps on the independent Dolt data
+(2019–2026) gives a median Sharpe of **0.61 with 8 of 10 positive**:
+
+| | COST | AMZN | JPM | META | MSFT | AAPL | GOOGL | UNH | WMT | XOM |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Sharpe | 1.12 | 0.85 | 0.69 | 0.63 | 0.62 | 0.60 | 0.59 | 0.33 | −0.17 | −0.31 |
+
+So the conditional variance risk premium is not an SPY artifact, and a breadth basket is a legitimate way to keep the
+gate strict while still trading. `synthetix_alpha/live/screen.py` implements the daily scan against the liquidity
+floors in `config/universe.yaml`.
+
+**But the screener is not yet safe to trade unattended.** Running it today returns NTAP, ADSK, ASO, PVH, CASY and AEO
+— every one of them reporting earnings within days. That is exactly the trap: high IV/RV usually prices a scheduled
+event, and the premium is compensation for real jump risk. The `iv_rv_max` cap (default 2.0) removes only the most
+extreme cases. **An earnings-calendar filter is a required prerequisite before any single-name deployment**, and it
+does not exist yet. Until it does, the index pair (SPY/QQQ) is the only validated way to run this.
 
 ## Recommended live risk gates
 
 - Defined-risk structures only (every position has a bought wing); no naked short options.
 - 3% of equity at risk per position, max 5 concurrent → ≤15% of the account at risk.
-- Skip any underlying with a scheduled earnings date inside the position's life.
+- Skip any underlying with a scheduled earnings date inside the position's life (**not yet implemented** — this is
+  why single-name trading is gated off; see the screener caveat above).
 - Require the quoted credit to be ≥5% of max loss, and both legs to have a real bid (≥ $0.05).
 - Halt new entries after a 5% account drawdown.
 

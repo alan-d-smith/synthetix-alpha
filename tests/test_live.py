@@ -97,3 +97,42 @@ def test_gs_quant_technicals():
     t = technicals(spot)
     assert list(t.columns) == ["rsi", "bollinger_pos", "macd"]
     assert t["rsi"].dropna().between(0, 100).all() and t["rsi"].iloc[-1] > 90  # monotone rise -> overbought
+
+
+def test_screen_filters_regime_and_universe(monkeypatch):
+    import pandas as pd
+    from synthetix_alpha.live import screen
+
+    # the IV/RV gate is applied in SQL, so the fake returns only rows that already passed it
+    raw = pd.DataFrame({"symbol": ["AAA", "BBB", "CCC"], "date": ["2026-08-27"] * 3,
+                        "iv": [0.6, 0.4, 0.5], "hv": [0.3, 0.3, 0.25],
+                        "iv_rv": [2.0, 1.33, 2.0], "iv_rank": [0.9, 0.5, 0.8]})
+    seen = {}
+    def fake_query(sql, db=None):
+        seen["sql"] = sql
+        return raw
+    monkeypatch.setattr(screen.dolt, "query", fake_query)
+    u = {"min_price": 5.0, "avg_dollar_volume_floor": 5e7, "ticker_denylist": ["CCC"]}
+    out = screen.scan(universe=u)
+    assert list(out.index) == ["AAA", "BBB"]        # denylist drops CCC, rank orders the rest
+    assert "BETWEEN 1.25 AND 2.0" in seen["sql"]    # event-risk cap is in the query
+    assert list(screen.scan(universe={**u, "ticker_allowlist": ["BBB"]}).index) == ["BBB"]
+
+
+def test_liquidity_floors():
+    import datetime as dt
+    import pandas as pd
+    from synthetix_alpha.live import screen
+
+    idx = pd.to_datetime([f"2026-08-{d:02d}" for d in (24, 25, 26)], utc=True).rename("timestamp")
+    bars = pd.DataFrame({"symbol": ["AAA"] * 3 + ["PENNY"] * 3,
+                         "close": [100.0, 101.0, 102.0, 2.0, 2.1, 2.2],
+                         "volume": [1e6, 1e6, 1e6, 1e6, 1e6, 1e6]},
+                        index=idx.append(idx))
+
+    class C:
+        def stock_bars(self, *a, **k):
+            return bars
+
+    out = screen.liquidity(["AAA", "PENNY"], u={"min_price": 5.0, "avg_dollar_volume_floor": 5e7}, client=C())
+    assert bool(out.loc["AAA", "liquid"]) and not bool(out.loc["PENNY", "liquid"])
