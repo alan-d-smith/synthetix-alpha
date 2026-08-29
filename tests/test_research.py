@@ -75,3 +75,20 @@ def test_evaluate_reports_errors_without_raising(tmp_path):
     (tmp_path / "paper_broken.json").write_text(json.dumps({"name": "broken", "legs": []}))
     rows = loop.evaluate(tmp_path, incumbent=None, log=False)
     assert len(rows) == 1 and "error" in rows[0]
+
+
+def test_spec_carries_provenance(tmp_path):
+    from synthetix_alpha.strategy.spec import Spec
+    s = Spec("paper_x", legs=[{"type": "put", "side": "short", "delta": 0.3}],
+             source="arXiv:2608.20020v1 Reconfiguration Premium")
+    s.save(tmp_path / "s.json")
+    assert Spec.load(tmp_path / "s.json").source.startswith("arXiv:2608.20020v1")
+
+
+def test_evaluate_reports_source(tmp_path):
+    from synthetix_alpha.strategy.spec import Spec
+    Spec("paper_demo", legs=[{"type": "put", "side": "short", "delta": 0.3},
+                             {"type": "put", "side": "long", "delta": 0.15}],
+         underlyings=["SPY"], source="arXiv:9999.1 Demo").save(tmp_path / "paper_demo.json")
+    rows = loop.evaluate(tmp_path, incumbent=None, log=False)
+    assert rows[0].get("source") == "arXiv:9999.1 Demo"

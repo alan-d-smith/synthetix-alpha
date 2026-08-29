@@ -24,7 +24,8 @@ BRIEF = """Read each paper and write any strategy it implies as a Spec JSON (see
 Rules that matter:
 - Only ideas the engine can express: daily decisions, static positions, legs by delta/moneyness/width, signal gates
   over the listed features. Anything else goes in missing_primitives instead of a spec.
-- Name specs paper_<arxivid>_<short>.json and write them to {spec_dir}.
+- Name specs paper_<arxivid>_<short>.json, write them to {spec_dir}, and set the spec's `source` field to
+  "arXiv:<id> <short title>" so every result stays attributable to the paper it came from.
 - Do not tune on the backtest. Write the paper's idea, then let `loop evaluate` score it.
 - A candidate is only interesting if it beats the incumbent by more than {floor} Sharpe; smaller differences are
   inside this sample's noise. Say so rather than claiming an improvement.
@@ -34,8 +35,20 @@ Papers queued:
 """
 
 
-def find(limit: int = 5, min_relevance: float = 0.4, since_days: int = 120, download: bool = True) -> list[dict]:
-    papers = arxiv.pending(min_relevance=min_relevance, since_days=since_days, limit=limit)
+TOPICS = ("variance risk premium", "volatility risk premium", "option returns", "covered call",
+          "put writing", "implied volatility term structure", "option trading strategy", "delta hedging")
+
+
+def find(limit: int = 5, min_relevance: float = 0.4, since_days: int = 120, download: bool = True,
+         topics: Optional[list[str]] = None) -> list[dict]:
+    """Recent submissions plus targeted topic searches, filtered against the library."""
+    seen = arxiv.load_library()
+    found = {p["id"]: p for p in arxiv.pending(min_relevance=min_relevance, since_days=since_days, limit=limit * 3)}
+    for t in (topics if topics is not None else TOPICS):
+        for p in arxiv.search(terms=[t], max_results=15):
+            if p["id"] not in seen and arxiv.relevance(p) >= min_relevance:
+                found.setdefault(p["id"], p)
+    papers = sorted(found.values(), key=lambda p: (-arxiv.relevance(p), p["published"]), reverse=False)[:limit]
     for p in papers:
         p["local_pdf"] = str(arxiv.download(p)) if download else ""
     arxiv.record(papers, status="queued")
@@ -68,8 +81,10 @@ def evaluate(spec_dir: Path = SPEC_DIR, incumbent: Optional[Path] = None, log: b
         if base is not None:
             row["above_noise_floor"] = bool(res["summary"]["mean_sharpe"] - base > NOISE_FLOOR)
         Path(str(path).replace(".json", "_results.json")).write_text(json.dumps(res, indent=1, default=str))
+        row["source"] = spec.source
         if log and (base is None or s > base):
-            progress.append([progress.entry(spec, res, gen=99, note=f"paper-derived: {path.stem}")])
+            note = f"from {spec.source}" if spec.source else f"paper-derived: {path.stem}"
+            progress.append([progress.entry(spec, res, gen=99, note=note)])
         out.append(row)
     if log and out:
         progress.render()

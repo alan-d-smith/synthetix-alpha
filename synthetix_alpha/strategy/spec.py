@@ -47,6 +47,7 @@ class Spec:
     slippage: float = 0.5  # fraction of the half-spread paid on each leg fill
     min_bid: float = 0.05
     min_volume: float = 0.0  # contracts traded that day; ignored where the source has no volume
+    source: Optional[str] = None  # provenance, e.g. an arXiv id and title
     min_credit: Optional[float] = None  # credit structures only: skip entries where credit / max_loss < this
 
     def __post_init__(self):

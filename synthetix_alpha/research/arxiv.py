@@ -63,7 +63,7 @@ def search(categories: Iterable[str] = CATEGORIES, terms: Optional[Iterable[str]
     """Most recent submissions in the given categories, newest first."""
     query = " OR ".join(f"cat:{c}" for c in categories)
     if terms:
-        query = f"({query}) AND ({' OR '.join(f'all:%22{t}%22' for t in terms)})"
+        query = f"({query}) AND ({' OR '.join(chr(34).join(('all:', t, '')) for t in terms)})"
     papers = parse(_get({"search_query": query, "start": 0, "max_results": max_results,
                          "sortBy": "submittedDate", "sortOrder": "descending"}))
     if since:
