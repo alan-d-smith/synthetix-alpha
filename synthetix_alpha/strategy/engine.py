@@ -58,7 +58,8 @@ def _fill(leg: OpenLeg, chain: pd.DataFrame, spot: float, direction: int, slip: 
     if leg.type == "stock":
         return spot
     row = chain.loc[leg.symbol]
-    return float(row["mid"] + direction * slip * (row["ask"] - row["bid"]) / 2)
+    price = float(row["mid"] + direction * slip * (row["ask"] - row["bid"]) / 2)
+    return price if price == price else leg.mark
 
 
 def _mark(pos: Position, chain: Optional[pd.DataFrame], spot: float, date: dt.date) -> None:
@@ -68,7 +69,9 @@ def _mark(pos: Position, chain: Optional[pd.DataFrame], spot: float, date: dt.da
         elif leg.expiration and date >= leg.expiration:
             leg.mark = _intrinsic(leg, spot)
         elif chain is not None and leg.symbol in chain.index:
-            leg.mark = float(chain.at[leg.symbol, "mid"])
+            mid = float(chain.at[leg.symbol, "mid"])
+            if mid == mid:  # keep the last good mark if the contract is unquoted today
+                leg.mark = mid
 
 
 def _pick_expiration(chain: pd.DataFrame, spec: Spec, offset: int) -> Optional[object]:
@@ -88,7 +91,8 @@ def select(spec: Spec, chain: pd.DataFrame, spot: float) -> Optional[list[OpenLe
         exp = _pick_expiration(chain, spec, leg.dte_offset)
         if exp is None:
             return None
-        e = chain[(chain["expiration"] == exp) & (chain["type"] == leg.type) & (chain["bid"] >= spec.min_bid)]
+        e = chain[(chain["expiration"] == exp) & (chain["type"] == leg.type) & (chain["bid"] >= spec.min_bid)
+                  & chain["mid"].notna() & chain["delta"].notna()]
         if e.empty:
             return None
         if leg.delta is not None:

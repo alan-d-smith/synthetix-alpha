@@ -78,4 +78,7 @@ deployment caveats.
 ```sh
 python -m synthetix_alpha.strategy.run strategies/put_vertical_ivrv.json        # backtest
 python -m synthetix_alpha.strategy.verify strategies/put_vertical_ivrv.json --oos AAPL --dolt SPY
+python -m synthetix_alpha.strategy.plots strategies/put_vertical_ivrv.json    # figures -> docs/img/
 ```
+
+![Strategy performance](docs/img/put_vertical_ivrv_performance.png)

@@ -75,7 +75,12 @@ Alternates kept for regime coverage: `put_diagonal_ivrv_robust.json` (189 trades
 `index_condor_trend.json` (two-sided, index-only — it fails on single names).
 
 
+![Performance of the deployed strategy](img/put_vertical_ivrv_performance.png)
+
 ## What verification found
+
+![Gate sweep and parameter fragility](img/put_vertical_ivrv_research.png)
+
 
 **Survives** (numbers are for the deployed `put_vertical_ivrv`):
 - **Independent vendor, unseen years** — Dolt SPY 2019–2026 (the fitting data ends in 2022): Sharpe **0.65** over
@@ -151,3 +156,16 @@ does not exist yet. Until it does, the index pair (SPY/QQQ) is the only validate
 - Kaggle single-name chains are **not split-adjusted** (AAPL 4:1 Aug 2020, TSLA 5:1/3:1, NVDA 4:1 Jul 2021).
 - The Dolt surface is coarse (~3 expirations × ~20 strikes, every other day), so short-DTE candidates cannot be
   fairly verified on it — a 7–21 DTE condor scored −0.87 there largely for that reason.
+
+## Regenerating the figures
+
+Both figures are produced from the backtest itself, so they cannot drift from the numbers in this document:
+
+```sh
+python -m synthetix_alpha.strategy.verify strategies/put_vertical_ivrv.json --oos AAPL --dolt SPY
+python -m synthetix_alpha.strategy.plots  strategies/put_vertical_ivrv.json     --verify datasets/research/verify/put_vertical_ivrv_verify.json
+```
+
+The plot script writes `docs/img/<spec name>_performance.png` and `<spec name>_research.png`. If you change a spec or
+the engine on a branch, rerun both commands and commit the regenerated PNGs alongside the updated tables here. The gate
+sweep re-runs one backtest per threshold, so it takes a few minutes; pass `--no-sweep` to skip it.
