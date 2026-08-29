@@ -157,6 +157,22 @@ does not exist yet. Until it does, the index pair (SPY/QQQ) is the only validate
 - The Dolt surface is coarse (~3 expirations × ~20 strikes, every other day), so short-DTE candidates cannot be
   fairly verified on it — a 7–21 DTE condor scored −0.87 there largely for that reason.
 
+## Progress log
+
+[`progress.md`](progress.md) records every candidate promoted out of a generation with a UTC timestamp, so the
+improvement is auditable rather than asserted. The headline: the hand-written baseline scored **−1.18**; three
+generations later the deployed rule scores **+1.09**.
+
+| | baseline | gen 0 | gen 2 | gen 3 |
+|---|---|---|---|---|
+| score | −1.18 | +0.75 | +0.98 | **+1.09** |
+| mean Sharpe | −0.13 | 0.85 | 1.01 | **1.13** |
+| max drawdown | −8.3% | −2.7% | −1.1% | **−1.4%** |
+| trades | 168 | 49 | 59 | **104** |
+
+Log a new candidate with `python -m synthetix_alpha.strategy.progress <spec.json> --gen N --note "..."`. The JSONL
+behind it is append-only, so a later run cannot rewrite earlier history.
+
 ## Regenerating the figures
 
 Both figures are produced from the backtest itself, so they cannot drift from the numbers in this document:
