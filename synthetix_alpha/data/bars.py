@@ -1,4 +1,4 @@
-"""gs-quant DataSources over a shared, batched BarStore.
+"""BarStore (batched, cached bars from any provider) and gs-quant DataSources over it.
 
 Daily sources are indexed by tz-naive NY trading date and also answer datetime states with that day's bar,
 so one daily source serves both DAILY (valuation) and REAL_TIME (fills) in PredefinedAssetEngine.
@@ -24,11 +24,12 @@ from gs_quant.common import BuySell, OptionStyle, OptionType
 from gs_quant.data import DataFrequency
 from gs_quant.instrument import EqOption, Instrument
 
-from synthetix_alpha.data.alpaca.client import BAR_FIELDS, AlpacaClient
-from synthetix_alpha.data.alpaca.occ import parse_occ_symbol
+from synthetix_alpha.data.alpaca import AlpacaClient
+from synthetix_alpha.data.occ import parse_occ_symbol
+from synthetix_alpha.data.schema import BAR_COLUMNS
 
 NY = ZoneInfo("America/New_York")
-OPTIONS_DATA_START = dt.date(2024, 2, 1)
+OPTIONS_DATA_START = dt.date(2024, 2, 1)  # Alpaca option history begins here
 _INTRADAY = re.compile(r"^\d+(Min|T|Hour|H)$", re.I)
 Key = tuple[str, str, str]  # (kind, timeframe, symbol)
 
@@ -38,7 +39,7 @@ def _date(v: Union[dt.date, dt.datetime]) -> dt.date:
 
 
 class BarStore:
-    """Caches bars per (kind, timeframe, symbol); missing symbols/windows are fetched in batched requests."""
+    """Caches bars per (kind, timeframe, symbol). Preload with `add`; anything missing is fetched from Alpaca in batches."""
 
     def __init__(self, client: Optional[AlpacaClient] = None, stock_feed: Optional[str] = None):
         self._client, self.stock_feed = client, stock_feed
@@ -51,6 +52,21 @@ class BarStore:
             self._client = AlpacaClient()
         return self._client
 
+    def add(self, kind: str, timeframe: str, bars: pd.DataFrame, start: Optional[dt.date] = None,
+            end: Optional[dt.date] = None) -> None:
+        """Preload bars in the BAR_COLUMNS layout; the covered window defaults to the bars' own date range."""
+        for symbol, b in bars.groupby("symbol", sort=False):
+            self._put(kind, timeframe, symbol, b, start or b.index.min().date(), end or b.index.max().date())
+
+    def _put(self, kind, timeframe, symbol, bars, start, end):
+        key = (kind, timeframe, symbol)
+        if key in self._bars:
+            bars = pd.concat([self._bars[key], bars])
+            bars = bars[~bars.index.duplicated(keep="last")].sort_index()
+            w = self._window[key]
+            start, end = min(start, w[0]), max(end, w[1])
+        self._bars[key], self._window[key] = bars, (start, end)
+
     def ensure(self, kind: str, timeframe: str, symbols: Iterable[str], start: dt.date, end: dt.date) -> None:
         todo = {}
         for s in symbols:
@@ -61,12 +77,11 @@ class BarStore:
             return
         lo, hi = min(w[0] for w in todo.values()), max(w[1] for w in todo.values())
         if kind == "option":
-            bars = self.client.option_bars(list(todo), timeframe, lo, hi + dt.timedelta(days=1))
+            bars = self.client.option_bars(list(todo), timeframe, lo, hi)
         else:
-            bars = self.client.stock_bars(list(todo), timeframe, lo, hi + dt.timedelta(days=1), feed=self.stock_feed)
+            bars = self.client.stock_bars(list(todo), timeframe, lo, hi, feed=self.stock_feed)
         for s in todo:
-            self._bars[(kind, timeframe, s)] = bars[bars["symbol"] == s]
-            self._window[(kind, timeframe, s)] = (lo, hi)
+            self._put(kind, timeframe, s, bars[bars["symbol"] == s], lo, hi)
 
     def bars(self, kind: str, timeframe: str, symbol: str) -> pd.DataFrame:
         return self._bars[(kind, timeframe, symbol)]
@@ -87,7 +102,7 @@ def default_store() -> BarStore:
 
 @dataclass_json
 @dataclass
-class AlpacaBarsDataSource(DataSource):
+class BarsDataSource(DataSource):
     symbol: str
     field: str = "close"
     timeframe: str = "1Day"
@@ -95,7 +110,7 @@ class AlpacaBarsDataSource(DataSource):
     end: Optional[dt.date] = dc_field(default=None, metadata=field_metadata)
     missing_data_strategy: MissingDataStrategy = dc_field(default=MissingDataStrategy.fail, metadata=field_metadata)
     store: InitVar[Optional[BarStore]] = None
-    class_type: str = static_field("alpaca_bars_data_source")
+    class_type: str = static_field("bars_data_source")
 
     kind: ClassVar[str]
     floor: ClassVar[dt.date] = dt.date(2000, 1, 1)
@@ -103,8 +118,7 @@ class AlpacaBarsDataSource(DataSource):
 
     def __post_init__(self, store=None):
         self.store = store or default_store()
-        self.field = BAR_FIELDS.get(self.field, self.field)
-        if self.field not in BAR_FIELDS.values():
+        if self.field not in BAR_COLUMNS[1:]:
             raise ValueError(f"unknown bar field {self.field!r}")
         self._bars: Optional[pd.DataFrame] = None
         self._source: Optional[GenericDataSource] = None
@@ -125,9 +139,9 @@ class AlpacaBarsDataSource(DataSource):
         bars = self.store.bars(self.kind, self.timeframe, self.symbol)
         if bars is self._bars:
             return
-        s = bars[self.field].astype(float)
+        s = bars[self.field].astype(float).dropna()
         if s.empty:
-            raise RuntimeError(f"no {self.timeframe} bars for {self.symbol} in [{start}, {end}]")
+            raise RuntimeError(f"no {self.timeframe} {self.field} for {self.symbol} in [{start}, {end}]")
         if not self.intraday:
             s.index = s.index.tz_convert(NY).normalize().tz_localize(None)
             s = s[~s.index.duplicated(keep="last")]
@@ -155,8 +169,8 @@ class AlpacaBarsDataSource(DataSource):
 
 @dataclass_json
 @dataclass
-class AlpacaOptionBarsDataSource(AlpacaBarsDataSource):
-    class_type: str = static_field("alpaca_option_bars_data_source")
+class OptionBarsDataSource(BarsDataSource):
+    class_type: str = static_field("option_bars_data_source")
     kind: ClassVar[str] = "option"
     floor: ClassVar[dt.date] = OPTIONS_DATA_START
     history: ClassVar[dt.timedelta] = dt.timedelta(days=3650)
@@ -168,13 +182,20 @@ class AlpacaOptionBarsDataSource(AlpacaBarsDataSource):
 
 @dataclass_json
 @dataclass
-class AlpacaStockBarsDataSource(AlpacaBarsDataSource):
-    class_type: str = static_field("alpaca_stock_bars_data_source")
+class StockBarsDataSource(BarsDataSource):
+    class_type: str = static_field("stock_bars_data_source")
     kind: ClassVar[str] = "stock"
 
     def __post_init__(self, store=None):
         super().__post_init__(store)
         self.symbol = self.symbol.upper()
+
+
+def chain_bars(chains: pd.DataFrame) -> pd.DataFrame:
+    """Historical chains ((date, symbol) x CHAIN_COLUMNS) -> daily bars with close = mid, volume; OHLC/vwap NaN."""
+    df = chains.reset_index()
+    bars = pd.DataFrame({"timestamp": df["quote_time"], "symbol": df["symbol"], "close": df["mid"], "volume": df["volume"]})
+    return bars.reindex(columns=["timestamp", *BAR_COLUMNS]).set_index("timestamp")
 
 
 def to_eq_option(symbol: str, buy_sell: BuySell = BuySell.Buy, number_of_options: float = 1.0) -> EqOption:
@@ -185,7 +206,7 @@ def to_eq_option(symbol: str, buy_sell: BuySell = BuySell.Buy, number_of_options
                     buy_sell=buy_sell, name=c.symbol)
 
 
-def register(data_manager: DataManager, daily: AlpacaBarsDataSource, intraday: Optional[AlpacaBarsDataSource] = None,
+def register(data_manager: DataManager, daily: BarsDataSource, intraday: Optional[BarsDataSource] = None,
              instrument: Optional[Instrument] = None) -> Instrument:
     """Register price sources for PredefinedAssetEngine: `daily` for EOD valuation, `intraday` (or `daily`) for fills."""
     instrument = instrument or to_eq_option(daily.symbol)

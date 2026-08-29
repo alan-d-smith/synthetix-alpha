@@ -11,11 +11,23 @@ cp .env.example .env   # fill in ALPACA_API_KEY / ALPACA_API_SECRET
 pytest
 ```
 
-## Alpaca data → gs-quant
+## Strategy research
+
+```sh
+python -m synthetix_alpha.strategy.run spec.json --out results.json            # Kaggle chains (2016-2023)
+python -m synthetix_alpha.strategy.run spec.json --source dolt --start 2023-01-01  # Dolt surfaces + Alpaca spot (OOS)
+```
+
+`synthetix_alpha/strategy`: a declarative `Spec` (legs by delta/moneyness/width, DTE window, signal gates, exits, sizing,
+costs) interpreted by a deterministic daily backtester over EOD chains. Research agents mutate specs, never code;
+`datasets/research/` holds generations, results and the report.
+
+## Market data → gs-quant
 
 ```python
 import datetime as dt
-from synthetix_alpha.data.alpaca import AlpacaClient, AlpacaOptionBarsDataSource, BarStore, register
+from synthetix_alpha.data import AlpacaClient, BarStore, OptionBarsDataSource, chain_bars, register
+from synthetix_alpha.data import dolt, kaggle
 from gs_quant.backtests.data_sources import DataManager
 
 c = AlpacaClient()
@@ -25,5 +37,27 @@ bars = c.option_bars(chain.index[:5], "15Min", start="2026-08-20")  # OHLCV hist
 store = BarStore(c)
 store.ensure("option", "1Day", chain.index, dt.date(2026, 8, 1), dt.date.today())  # one batched fetch for the whole chain
 dm = DataManager()
-option = register(dm, AlpacaOptionBarsDataSource(symbol=chain.index[0], store=store))  # use `option` in gs-quant triggers/actions
+option = register(dm, OptionBarsDataSource(symbol=chain.index[0], store=store))  # use `option` in gs-quant triggers/actions
+
+# Historical EOD chains 2019-2023 (Kaggle), same layouts: chains.loc[date] is a chain snapshot
+chains = kaggle.load_chains("QQQ")                 # also AAPL, NVDA, SPY, TSLA; (date, symbol) x CHAIN_COLUMNS, parquet-cached
+store.add("option", "1Day", chain_bars(chains))
+store.add("stock", "1Day", kaggle.underlying_bars(chains))
+
+# DoltHub post-no-preference/options (`dolt clone post-no-preference/options datasets/options`): coarse EOD IV surfaces,
+# ~1,500 names, 2019-02 → present, every ~2 days; plus daily HV/IV summaries. Cached per symbol-year under datasets/cache.
+surface = dolt.load_chains(["SPY", "QQQ"], dt.date(2023, 1, 1), dt.date(2024, 12, 31))
+vol = dolt.load_volatility(["SPY"], dt.date(2023, 1, 1), dt.date(2024, 12, 31))
+```
+
+## Deployed strategy
+
+`strategies/put_diagonal_ivrv.json` — put credit diagonal on SPY/QQQ, entered only when implied vol is rich versus
+realised (`IV/RV >= 1.25`). In-sample mean Sharpe 1.01, max DD 1.1%; Sharpe 0.84 out-of-sample on independent
+2019-2026 vendor data. See [docs/research.md](docs/research.md) for the search, the verification, and the
+deployment caveats.
+
+```sh
+python -m synthetix_alpha.strategy.run strategies/put_diagonal_ivrv.json        # backtest
+python -m synthetix_alpha.strategy.verify strategies/put_diagonal_ivrv.json --oos AAPL --dolt SPY
 ```

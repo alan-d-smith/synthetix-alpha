@@ -1,12 +1,18 @@
 import os
+import shutil
+from pathlib import Path
 
 from dotenv import find_dotenv, load_dotenv
 
 load_dotenv(find_dotenv(usecwd=True), override=False)
 
-DATA_URL = os.environ.get("ALPACA_DATA_URL", "https://data.alpaca.markets")
-TRADING_URL = os.environ.get("ALPACA_TRADING_URL", "https://paper-api.alpaca.markets")
+PAPER = os.environ.get("ALPACA_LIVE_TRADE", "").strip().lower() not in ("1", "true", "yes")  # same switch as the Alpaca CLI
 OPTIONS_FEED = os.environ.get("ALPACA_OPTIONS_FEED", "indicative")  # "opra" needs a subscription
+
+ROOT = Path(__file__).resolve().parents[1]
+DOLT_BIN = os.environ.get("DOLT_BIN") or shutil.which("dolt") or "C:/Program Files/Dolt/bin/dolt.exe"
+DOLT_OPTIONS_DB = Path(os.environ.get("DOLT_OPTIONS_DB", ROOT / "datasets" / "options"))  # dolt clone post-no-preference/options
+DOLT_CACHE = ROOT / "datasets" / "cache" / "dolt"
 
 
 def credentials() -> tuple[str, str]:
