@@ -1,13 +1,15 @@
 {
-  "name": "portfolio_index_plus_singlename",
+  "name": "portfolio_three_sleeve",
   "sleeves": [
     "strategies/put_vertical_ivrv.json",
-    "strategies/put_vertical_singlename.json"
+    "strategies/put_vertical_singlename.json",
+    "strategies/call_vertical_downtrend.json"
   ],
   "weights": [
-    0.5,
-    0.5
+    0.3333,
+    0.3333,
+    0.3334
   ],
-  "source": "arXiv:2504.xxxxx Lillo, Mazzarisi & Tsaknaki, Tackling estimation risk in Kelly investing using options (combination theorem KOc 4.1)",
-  "note": "sleeve correlation 0.335; blended Sharpe 1.15 vs 0.98 / 0.88 standalone on the 2020-2022 overlap"
+  "source": "combination primitive from Lillo, Mazzarisi & Tsaknaki, Tackling estimation risk in Kelly investing using options",
+  "note": "equal weight deliberately: the paper's point is estimation risk, and optimised weights (inverse-vol 1.347) beat naive equal weight (1.340) by less than the estimation error. Correlations: index/single +0.335, index/bear-call -0.159, single/bear-call -0.244."
 }

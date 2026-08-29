@@ -1,0 +1,56 @@
+{
+  "name": "call_vertical_downtrend",
+  "legs": [
+    {
+      "type": "call",
+      "side": "short",
+      "delta": 0.3,
+      "moneyness": null,
+      "width": null,
+      "dte_offset": 0,
+      "ratio": 1
+    },
+    {
+      "type": "call",
+      "side": "long",
+      "delta": 0.15,
+      "moneyness": null,
+      "width": null,
+      "dte_offset": 0,
+      "ratio": 1
+    }
+  ],
+  "underlyings": [
+    "SPY",
+    "QQQ"
+  ],
+  "dte_target": 45,
+  "dte_min": 30,
+  "dte_max": 60,
+  "entry_every_days": 7,
+  "max_positions": 4,
+  "signal": {
+    "sma200_ratio": [
+      null,
+      0.0
+    ],
+    "mom20": [
+      null,
+      0.03
+    ]
+  },
+  "profit_target": 0.5,
+  "stop_loss": 2.0,
+  "dte_exit": 21,
+  "max_hold_days": null,
+  "risk_fraction": 0.02,
+  "sizing": "max_loss",
+  "max_contracts": 100,
+  "commission": 0.65,
+  "slippage": 0.5,
+  "min_bid": 0.05,
+  "min_volume": 25.0,
+  "source": "gen-0 search; kept as the regime complement - short call spread below the 200d SMA",
+  "size_scale": null,
+  "min_credit": null
+}

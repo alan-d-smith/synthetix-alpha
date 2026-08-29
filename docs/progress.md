@@ -23,5 +23,6 @@ scoring -9. Return is the mean across the underlyings traded, each on its own $1
 | 2026-08-29 16:59 | 4 | `put_vertical_ivrv` | SPY+QQQ | +5.7% | 0.92 | 0.70 | -2.0% | -1.5% | 102 | **+0.520** | !! liquidity floor: require 25 contracts traded that day. 9.8% of earlier fills were in contracts with ZERO volume; the in-sample/OOS gap narrowed 1.15/0.67 -> 0.92/0.67 |
 | 2026-08-29 17:26 | 5 | `put_vertical_singlename` | AAPL | +14.4% | 0.90 | 0.90 | -2.1% | +0.1% | 78 | **+0.838** | single-name variant: yfinance earnings filter (no announcement within 30d). AAPL score -0.151 -> +0.838, Sharpe 0.46 -> 0.90, maxDD -7.7% -> -2.1% |
 | 2026-08-29 19:42 | 7 | `portfolio_index_plus_singlename` | SPY+QQQ+AAPL | +7.1% | 1.15 | 1.15 | -1.1% | +0.1% | 180 | **+1.176** | combine the index and single-name sleeves (corr 0.335); primitive from arXiv Lillo et al., Kelly investing using options |
+| 2026-08-29 20:11 | 8 | `portfolio_three_sleeve` | SPY+QQQ+AAPL | +8.1% | 1.11 | 1.11 | -0.8% | +0.0% | 258 | **+1.213** | add a negatively-correlated bear-call sleeve (corr -0.16 / -0.24). On the overlap where all three run, Sharpe 1.34 vs 1.15 for two sleeves; combination primitive from the Kelly-options paper |
 
-12 improvements across 16 logged evaluations; score -1.180 -> +1.176, mean Sharpe -0.13 -> 1.15.
+13 improvements across 17 logged evaluations; score -1.180 -> +1.213, mean Sharpe -0.13 -> 1.11.

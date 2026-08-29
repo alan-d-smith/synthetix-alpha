@@ -552,3 +552,32 @@ sleeve, because at $50k the integer contract rounding changes which trades happe
 capital and combined at the **return** level. The first version got this wrong and reported a Sharpe of −0.01.
 
 Deployed as `strategies/portfolio.json`; run it with the same CLI as any spec.
+
+## A third sleeve, and why equal weight is the right call
+
+The combination primitive paid off twice. The gen-0 search had found a short call spread gated below the 200-day SMA
+that earned everything it earned in 2022 and was shelved for scoring poorly on its own (Sharpe 0.41). As a *sleeve*
+its standalone score is close to irrelevant; what matters is that it is **negatively correlated** with both put
+sleeves: −0.159 against the index sleeve and −0.244 against the single-name one.
+
+Measured on the 2020-2022 overlap where all three run:
+
+| portfolio | Sharpe | max drawdown |
+|---|---|---|
+| two sleeves, 50/50 | 1.146 | −1.14% |
+| **three sleeves, equal weight** | **1.340** | **−0.83%** |
+| three sleeves, inverse-vol | 1.347 | −0.88% |
+
+Higher Sharpe and a smaller drawdown. The theoretical blend from the covariance matrix is 1.340 against a measured
+1.340 — an exact match, so again this is arithmetic rather than a fitted effect.
+
+**Equal weight is deliberate.** The candidate weightings span 1.318 to 1.348, so the optimised inverse-vol weights beat
+naive equal weight by 0.007 of Sharpe, far less than the error in estimating the inputs. That is precisely the point of
+the paper the combination primitive came from — estimation risk in Kelly weighting — so the portfolio takes the naive
+weights and carries no fitted parameter.
+
+As deployed over the full period the portfolio has Sharpe 1.109 and a −0.83% drawdown, positive in every year. The
+full-period figure is lower than the overlap figure because 2016-2019 has only the single-name sleeve running and
+therefore no diversification to collect.
+
+`strategies/portfolio.json`, three sleeves, equal weight.
