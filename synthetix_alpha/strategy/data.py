@@ -11,6 +11,7 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
+from gs_quant.timeseries.technicals import bollinger_bands, macd, relative_strength_index
 
 from synthetix_alpha import config
 from synthetix_alpha.data import kaggle
@@ -64,7 +65,18 @@ def features(df: pd.DataFrame, spot: Optional[pd.Series] = None) -> pd.DataFrame
     f["iv_rank"] = f["atm_iv"].rolling(252, min_periods=60).rank(pct=True)
     f["iv_rv_ratio"] = f["atm_iv"] / f["rv20"]
     f["term_slope"] = f["far_iv"] - f["atm_iv"]
-    return f.drop(columns="far_iv")
+    return f.drop(columns="far_iv").join(technicals(f["spot"]))
+
+
+def technicals(spot: pd.Series) -> pd.DataFrame:
+    """RSI, Bollinger position and MACD from gs-quant, all trailing."""
+    bands = bollinger_bands(spot, 20, 2)
+    low, high = bands.iloc[:, 0], bands.iloc[:, 1]
+    return pd.DataFrame({
+        "rsi": relative_strength_index(spot, 14).squeeze(),
+        "bollinger_pos": (spot - low) / (high - low).replace(0, np.nan),
+        "macd": macd(spot) / spot,
+    })
 
 
 def _surface(d: pd.DataFrame, spot: float, dte: int, iv_name: str, skew_name: Optional[str]) -> dict:

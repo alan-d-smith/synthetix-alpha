@@ -1,0 +1,99 @@
+import datetime as dt
+
+import pandas as pd
+import pytest
+from alpaca.trading.enums import OrderClass, OrderSide, PositionIntent
+
+from synthetix_alpha.live import risk
+from synthetix_alpha.live.execution import (
+    already_submitted, build_order, client_order_id, find_missing_brackets, submit, track_order,
+)
+from synthetix_alpha.strategy.data import technicals
+
+LEGS = [{"symbol": "SPY260930P00760000", "side": "short", "ratio": 1},
+        {"symbol": "SPY260930P00740000", "side": "long", "ratio": 1}]
+RULES = risk.Rules(max_single_position_pct=0.10, max_open_positions=3, max_premium_at_risk_pct=0.02)
+
+
+def order(symbol="SPY", max_loss=1000.0, defined_risk=True):
+    return {"symbol": symbol, "max_loss": max_loss, "defined_risk": defined_risk}
+
+
+def test_rules_load_from_yaml():
+    r = risk.Rules.load()
+    assert r.defined_risk_only is True and 0 < r.max_premium_at_risk_pct <= 0.05 and r.max_leverage >= 1.0
+
+
+def test_risk_approves_within_caps():
+    d = risk.apply([order(), order("QQQ")], [], 100_000.0, RULES)
+    assert len(d.approved) == 2 and not d.halted
+
+
+def test_risk_blocks_undefined_and_oversized():
+    d = risk.apply([order(max_loss=5_000), order("QQQ", defined_risk=False), order("IWM", 900)], [], 100_000.0, RULES)
+    assert [o["symbol"] for o in d.approved] == ["IWM"]
+    assert any("defined-risk" in h for h in d.halts) and any("2.0% of NAV" in h for h in d.halts)
+
+
+def test_risk_halts_all_on_drawdown():
+    positions = [{"symbol": "SPY", "qty": 1, "avg_entry_price": 100.0, "unrealized_pl": -21_000.0}]
+    d = risk.apply([order()], positions, 100_000.0, RULES)
+    assert not d.approved and "total drawdown" in d.halts[0]
+    d2 = risk.apply([order()], [], 100_000.0, RULES, day_pnl=-6_000.0)
+    assert not d2.approved and "daily drawdown" in d2.halts[0]
+
+
+def test_risk_respects_position_slots():
+    positions = [{"symbol": s, "qty": 1, "avg_entry_price": 10.0, "unrealized_pl": 0.0} for s in ("A", "B")]
+    d = risk.apply([order("C", 500), order("D", 500)], positions, 100_000.0, RULES)
+    assert len(d.approved) == 1 and any("no position slots" in h for h in d.halts)
+    full = positions + [{"symbol": "C", "qty": 1, "avg_entry_price": 10.0, "unrealized_pl": 0.0}]
+    assert not risk.apply([order("D")], full, 100_000.0, RULES).approved
+
+
+def test_client_order_id_is_deterministic_and_order_independent():
+    a = client_order_id(LEGS, dt.date(2026, 9, 1))
+    assert a == client_order_id(list(reversed(LEGS)), dt.date(2026, 9, 1))
+    assert a != client_order_id(LEGS, dt.date(2026, 9, 2))
+
+
+def test_build_mleg_order():
+    o = build_order(LEGS, 3, -1.85)
+    assert o.order_class == OrderClass.MLEG and o.qty == 3 and o.limit_price == 1.85
+    assert [(l.side, l.position_intent) for l in o.legs] == [
+        (OrderSide.SELL, PositionIntent.SELL_TO_OPEN), (OrderSide.BUY, PositionIntent.BUY_TO_OPEN)]
+    single = build_order(LEGS[:1], 1, 2.0)
+    assert single.order_class == OrderClass.SIMPLE and single.symbol == LEGS[0]["symbol"]
+    with pytest.raises(ValueError):
+        build_order(LEGS * 3, 1, 1.0)
+    with pytest.raises(ValueError):
+        build_order([{**LEGS[0], "ratio": 2}, {**LEGS[1], "ratio": 4}], 1, 1.0)  # gcd != 1
+
+
+def test_submit_is_dry_run_by_default_and_idempotent(tmp_path):
+    store = tmp_path / "orders.json"
+    r = submit(LEGS, 2, -1.5, store=store)
+    assert r["status"] == "dry_run" and r["net"] == "credit" and not store.exists()
+    track_order(r["client_order_id"], r, store)
+    assert already_submitted(r["client_order_id"], store)
+    assert submit(LEGS, 2, -1.5, store=store)["status"] == "duplicate"
+
+
+def test_find_missing_brackets():
+    class P:
+        def __init__(self, s):
+            self.symbol, self.qty, self.unrealized_pl, self.asset_class = s, 1, 0.0, "us_option"
+
+    class O:
+        def __init__(self, s):
+            self.symbol, self.legs = s, None
+
+    missing = find_missing_brackets([P("A"), P("B")], [O("A")])
+    assert [m["symbol"] for m in missing] == ["B"]
+
+
+def test_gs_quant_technicals():
+    spot = pd.Series(range(100, 200), index=pd.bdate_range("2021-01-01", periods=100), dtype=float)
+    t = technicals(spot)
+    assert list(t.columns) == ["rsi", "bollinger_pos", "macd"]
+    assert t["rsi"].dropna().between(0, 100).all() and t["rsi"].iloc[-1] > 90  # monotone rise -> overbought

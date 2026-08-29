@@ -50,6 +50,19 @@ surface = dolt.load_chains(["SPY", "QQQ"], dt.date(2023, 1, 1), dt.date(2024, 12
 vol = dolt.load_volatility(["SPY"], dt.date(2023, 1, 1), dt.date(2024, 12, 31))
 ```
 
+## Live execution and risk gates
+
+`synthetix_alpha/live/` — paper-only order submission and the deterministic gates that sit in front of it.
+Limits live in [config/governance.yaml](config/governance.yaml), so they are auditable without touching code.
+
+```python
+from synthetix_alpha.live import Rules, apply, submit
+decision = apply(orders, positions, nav, Rules.load())   # defined-risk only, per-position and NAV caps, drawdown halts
+submit(legs, contracts, limit_price)                      # dry-run by default; deterministic client_order_id = no double-fills
+```
+
+`.agents/skills/` holds Alpaca API reference skills (trading, market data, paper CLI/MCP, broker flows).
+
 ## Deployed strategy
 
 `strategies/put_diagonal_ivrv.json` — put credit diagonal on SPY/QQQ, entered only when implied vol is rich versus
