@@ -1,7 +1,4 @@
-"""Adversarial checks for a candidate spec: parameter fragility, out-of-sample regimes, P&L concentration.
-
-python -m synthetix_alpha.strategy.verify spec.json [--oos AAPL,NVDA,TSLA] [--dolt SPY]
-"""
+"""Fragility sweep, out-of-sample regimes and P&L concentration for a candidate spec."""
 
 from __future__ import annotations
 

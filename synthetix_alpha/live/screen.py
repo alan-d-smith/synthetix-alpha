@@ -1,12 +1,4 @@
-"""Daily universe scan: which names are in the rich-IV regime the strategy needs.
-
-The deployed gate fires on ~25% of days for any one underlying, so trading a single index can mean no trades
-at all in a short window. This scans DoltHub's `volatility_history` (~1,500 names) for the same IV-vs-realised
-condition and applies the liquidity floors in config/universe.yaml.
-
-Extreme IV/RV usually prices a scheduled event (earnings, M&A, FDA) — selling that premium is the classic trap —
-so `iv_rv_max` caps the ratio rather than sorting by it.
-"""
+"""Daily scan for underlyings whose implied vol is rich vs realised, filtered by config/universe.yaml."""
 
 from __future__ import annotations
 
@@ -30,7 +22,7 @@ def rules(path: Optional[Path] = None) -> dict:
 
 def scan(iv_rv_min: float = 1.25, iv_rv_max: float = 2.0, limit: int = 40, asof: Optional[dt.date] = None,
          universe: Optional[dict] = None) -> pd.DataFrame:
-    """Names whose implied vol is rich vs realised, ranked by IV rank. Returns symbol-indexed frame."""
+    """In-regime names ranked by IV rank. iv_rv_max caps event-driven outliers (earnings, M&A)."""
     u = universe or rules()
     allow = {s.upper() for s in (u.get("ticker_allowlist") or [])}
     deny = {s.upper() for s in (u.get("ticker_denylist") or [])}
@@ -53,7 +45,7 @@ def scan(iv_rv_min: float = 1.25, iv_rv_max: float = 2.0, limit: int = 40, asof:
 
 
 def liquidity(symbols: list[str], u: Optional[dict] = None, days: int = 20, client=None) -> pd.DataFrame:
-    """Average dollar volume and last price over `days` sessions, with the universe.yaml floors applied."""
+    """Average dollar volume and last price, with universe.yaml floors applied."""
     from synthetix_alpha.data.alpaca import AlpacaClient
 
     u = u or rules()
@@ -68,7 +60,7 @@ def liquidity(symbols: list[str], u: Optional[dict] = None, days: int = 20, clie
 
 
 def candidates(iv_rv_min: float = 1.25, limit: int = 15, client=None) -> pd.DataFrame:
-    """Tradable shortlist: in-regime names that also clear the liquidity floors."""
+    """In-regime names that also clear the liquidity floors."""
     s = scan(iv_rv_min=iv_rv_min, limit=limit * 3)
     if s.empty:
         return s

@@ -1,8 +1,4 @@
-"""Per-underlying engine data: daily chain slices, spot, and trailing features (no lookahead). Cached as parquet.
-
-Sources: "kaggle" (full EOD chains 2016-2023, spot included) or "dolt" (coarse surfaces 2019-present, every ~2 days,
-spot joined from Alpaca daily bars) — the latter is an independent-vendor out-of-sample window.
-"""
+"""Per-underlying chain slices, spot and trailing features (no lookahead), cached as parquet. Source: kaggle | dolt."""
 
 from __future__ import annotations
 

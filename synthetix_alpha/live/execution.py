@@ -1,9 +1,4 @@
-"""Alpaca order submission for multi-leg option spreads. Paper only, idempotent, dry-run by default.
-
-Ported from the quant-agent PR's execution layer; the PR's `track_order` / `find_missing_brackets`
-skeletons are implemented here against a JSON store rather than left as no-ops, because a silent
-idempotency guarantee is worse than none.
-"""
+"""Alpaca order submission for option spreads. Paper only, idempotent, dry-run by default."""
 
 from __future__ import annotations
 
@@ -26,7 +21,7 @@ INTENT = {"long": PositionIntent.BUY_TO_OPEN, "short": PositionIntent.SELL_TO_OP
 
 
 def assert_paper() -> None:
-    """Refuse to run if live trading was requested (PR's guard: paper is a literal, never from env)."""
+    """Paper is a literal here, never read from env."""
     if os.environ.get("ALPACA_LIVE_TRADE", "").strip().lower() in ("1", "true", "yes"):
         raise RuntimeError("ALPACA_LIVE_TRADE is set — this module is paper-only. Unset it to proceed.")
 
@@ -38,7 +33,7 @@ def client() -> TradingClient:
 
 
 def client_order_id(legs: list[dict], date: Optional[dt.date] = None, tag: str = "sx") -> str:
-    """Deterministic id: the same spread on the same day yields the same id, so retries cannot double-fill."""
+    """Same spread + same day -> same id, so a retry cannot double-fill."""
     key = "|".join(sorted(f"{l['side']}{l['ratio']}{l['symbol']}" for l in legs))
     digest = hashlib.sha1(f"{key}@{date or dt.date.today()}".encode()).hexdigest()[:16]
     return f"{tag}-{digest}"
@@ -49,7 +44,7 @@ def _load(store: Path) -> dict:
 
 
 def track_order(coid: str, payload: dict, store: Path = STORE) -> None:
-    """Record a submission so a repeat of the same spread on the same day is refused."""
+    """Record a submission so the same spread is refused today."""
     store.parent.mkdir(parents=True, exist_ok=True)
     orders = _load(store)
     orders[coid] = {"submitted_at": dt.datetime.now(dt.timezone.utc).isoformat(), **payload}
@@ -62,10 +57,7 @@ def already_submitted(coid: str, store: Path = STORE) -> bool:
 
 def build_order(legs: list[dict], contracts: int, limit_price: float, coid: Optional[str] = None,
                 tif: TimeInForce = TimeInForce.DAY) -> LimitOrderRequest:
-    """Build a multi-leg (mleg) limit order. `limit_price` is the net debit (+) or credit (-) per share.
-
-    legs: [{"symbol": OCC, "side": "long"|"short", "ratio": int}, ...]
-    """
+    """legs = [{"symbol": OCC, "side": "long"|"short", "ratio": int}]; limit_price = net debit (+) or credit (-)."""
     if not 1 <= len(legs) <= 4:
         raise ValueError("Alpaca supports 1-4 option legs per order")
     if contracts < 1:
@@ -89,7 +81,7 @@ def build_order(legs: list[dict], contracts: int, limit_price: float, coid: Opti
 
 def submit(legs: list[dict], contracts: int, limit_price: float, *, dry_run: bool = True,
            trading: Optional[TradingClient] = None, store: Path = STORE) -> dict:
-    """Submit one spread. Returns a preview when dry_run (the default) so nothing trades unintentionally."""
+    """Returns a preview when dry_run (the default)."""
     coid = client_order_id(legs)
     preview = {"client_order_id": coid, "legs": legs, "contracts": contracts,
                "limit_price": round(limit_price, 2), "net": "credit" if limit_price < 0 else "debit"}
@@ -104,7 +96,7 @@ def submit(legs: list[dict], contracts: int, limit_price: float, *, dry_run: boo
 
 
 def find_missing_brackets(positions: list[Any], orders: list[Any]) -> list[dict]:
-    """Open option positions with no resting closing order — i.e. running unprotected."""
+    """Open option positions with no resting closing order."""
     resting = {str(getattr(l, "symbol", "")) for o in orders for l in (getattr(o, "legs", None) or [o])}
     out = []
     for p in positions:

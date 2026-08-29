@@ -1,9 +1,4 @@
-"""Deterministic risk gates applied after sizing, before any order reaches the broker.
-
-Ported from the quant-agent PR's risk_guard, adapted to this repo's option-order shape:
-caps are read from config/governance.yaml so limits are auditable and changeable without code.
-Every rejection returns a reason string; nothing is silently dropped.
-"""
+"""Risk gates applied after sizing, before any order reaches the broker. Limits live in config/governance.yaml."""
 
 from __future__ import annotations
 
@@ -38,7 +33,7 @@ class Rules:
 
 @dataclass
 class Decision:
-    """Orders cleared to send, plus a reason for every one that was not."""
+    """Approved orders plus a reason for each rejection."""
 
     approved: list[dict] = field(default_factory=list)
     halts: list[str] = field(default_factory=list)
@@ -59,7 +54,7 @@ def _position_notional(positions: list[dict], symbol: Optional[str] = None) -> f
 
 def apply(orders: list[dict], positions: list[dict], nav: float, rules: Optional[Rules] = None,
           day_pnl: float = 0.0) -> Decision:
-    """Gate `orders` against account state. Order keys: symbol, max_loss (risk $), defined_risk, underlying."""
+    """Order keys: symbol, max_loss ($ risk), defined_risk."""
     r = rules or Rules.load()
     d = Decision()
     if nav <= 0:
