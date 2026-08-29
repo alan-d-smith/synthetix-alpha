@@ -120,7 +120,6 @@ def test_screen_filters_regime_and_universe(monkeypatch):
 
 
 def test_liquidity_floors():
-    import datetime as dt
     import pandas as pd
     from synthetix_alpha.live import screen
 

@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from synthetix_alpha.strategy.data import EngineData
-from synthetix_alpha.strategy.spec import Leg, Spec
+from synthetix_alpha.strategy.spec import Spec
 
 MULT = 100
 

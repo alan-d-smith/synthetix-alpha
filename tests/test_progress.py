@@ -1,5 +1,4 @@
 import datetime as dt
-import json
 
 from synthetix_alpha.strategy import progress
 from synthetix_alpha.strategy.spec import Spec
