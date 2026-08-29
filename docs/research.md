@@ -581,3 +581,47 @@ full-period figure is lower than the overlap figure because 2016-2019 has only t
 therefore no diversification to collect.
 
 `strategies/portfolio.json`, three sleeves, equal weight.
+
+## Retesting the dismissed papers with the data that was already there
+
+Four ideas had been dismissed as "inside the noise" on a two-underlying sample that could only resolve a 0.54 Sharpe
+difference. That was the wrong instrument, not the wrong ideas: the DoltHub clone holds 1,522 names and only SPY had
+ever been used from it. Pulling 50 liquid names over 2019-2026 gives **7,395 trades across 48 usable names**, and a
+*paired* design — baseline and variant on the same name over the same period — removes the between-name variance that
+was swamping everything.
+
+| source | idea | mean ΔSharpe | t | win rate |
+|---|---|---|---|---|
+| [2608.12493](https://arxiv.org/abs/2608.12493) Che & Das | strikes by moneyness, not delta | **+0.582** | +7.39 | 88% |
+| [1006.1882](https://arxiv.org/abs/1006.1882) Petersen et al. | Omori 10-60 day post-shock window | +0.202 | +4.17 | 68% |
+| [2608.12493](https://arxiv.org/abs/2608.12493) Che & Das | skew ≤ 0.075 gate | +0.155 | +4.94 | 73% |
+| [2608.20020](https://arxiv.org/abs/2608.20020) Carvalho | `vix_rank ≥ 0.5` | +0.136 | +2.60 | 67% |
+| [2608.24786](https://arxiv.org/abs/2608.24786) Wysocki | Edge Allocation sizing | +0.012 | +0.35 | 54% |
+
+**Four of the five are real effects.** They were never disproved before; they were measured with an instrument too
+blunt to read them. Only Wysocki's sizing rule is genuinely null, and it stays rejected.
+
+Two things stop this becoming a deployment.
+
+**Significant is not profitable.** The baseline over this universe has a median Sharpe of −0.506 and is profitable on
+23% of names — single-name premium selling without an earnings filter simply loses. Only the moneyness variant crosses
+zero (median +0.038, profitable on 52%). Beating a losing baseline by a statistically certain margin still leaves you
+at break-even.
+
+**The effect is conditional, and my earlier refutation was on the wrong assets.** On Kaggle's fine grid the moneyness
+parameterisation *hurts* indices (SPY −0.234, QQQ −0.028) and *helps* single names (AAPL +0.221, TSLA +0.275, NVDA
++0.818). Fixed moneyness on a 60%-vol name sells a ~0.44-delta strike rather than 0.20, so it collects far more
+premium where vol is high. When I "refuted" the velocity trough earlier I tested it on SPY and QQQ — the two assets
+where it should not work. On single names the portfolio peaks at −4.0% forward moneyness, which is where Che & Das
+predict the trough at this tenor.
+
+Deploying it still failed, for a reason worth recording. Widening the single-name sleeve to AAPL+NVDA+TSLA with
+velocity-trough strikes lifts the blended Sharpe from 1.340 to **1.632** over the window where all three sleeves run —
+but nearly triples full-period drawdown, from −2.12% to −5.93%, because closer strikes collect more premium and lose
+more when they lose. The diversification masks that risk only while every sleeve is live. It is kept as
+`strategies/put_vertical_singlename_wide.json` and not deployed.
+
+Finding that comparison also exposed a bug in `backtest_combo`: sleeves with no data for a period were being filled
+with a 0% return, which reads as "flat" rather than "absent" and silently penalised any portfolio whose sleeves have
+different histories. Weights are now renormalised each day onto the sleeves that are actually live. Before the fix the
+widened portfolio looked better on the full period; after it, worse — the fix reversed the conclusion.

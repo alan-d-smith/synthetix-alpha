@@ -11,5 +11,5 @@
     0.3334
   ],
   "source": "combination primitive from Lillo, Mazzarisi & Tsaknaki, Tackling estimation risk in Kelly investing using options",
-  "note": "equal weight deliberately: the paper's point is estimation risk, and optimised weights (inverse-vol 1.347) beat naive equal weight (1.340) by less than the estimation error. Correlations: index/single +0.335, index/bear-call -0.159, single/bear-call -0.244."
+  "note": "equal weight deliberately: optimised weights beat naive equal weight by less than the estimation error. A widened 3-name sleeve using velocity-trough strikes (arXiv:2608.12493) raises Sharpe to 1.63 on the window where all sleeves are live, but nearly triples full-period drawdown, so it is kept as strategies/put_vertical_singlename_wide.json rather than deployed."
 }

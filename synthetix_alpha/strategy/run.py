@@ -54,7 +54,10 @@ def backtest_combo(specs: list, weights=None, equity0: float = 100_000.0, source
         sleeve = pd.concat(legs, axis=1).mean(axis=1)  # equal weight across the sleeve's underlyings
         per[spec.name] = {"weight": w, "sharpe": round(_sharpe(sleeve), 3)}
         rets.append(sleeve * w)
-    blended = pd.concat(rets, axis=1).fillna(0.0).sum(axis=1)
+    frame = pd.concat(rets, axis=1)
+    # a sleeve with no data that day is not flat, it is absent: renormalise onto the sleeves that are live
+    live = frame.notna().mul(weights, axis=1).sum(axis=1).replace(0, float("nan"))
+    blended = (frame.fillna(0.0).sum(axis=1) / live).fillna(0.0)
     curve = equity0 * (1 + blended).cumprod()
     m = metrics(curve, pd.DataFrame(), equity0)
     m["n_trades"] = trades
