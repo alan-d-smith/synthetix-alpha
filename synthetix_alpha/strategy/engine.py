@@ -93,6 +93,9 @@ def select(spec: Spec, chain: pd.DataFrame, spot: float) -> Optional[list[OpenLe
             return None
         e = chain[(chain["expiration"] == exp) & (chain["type"] == leg.type) & (chain["bid"] >= spec.min_bid)
                   & chain["mid"].notna() & chain["delta"].notna()]
+        if spec.min_volume and "volume" in e.columns:
+            liquid = e[e["volume"].fillna(spec.min_volume) >= spec.min_volume]
+            e = liquid if not liquid.empty else e.iloc[0:0]
         if e.empty:
             return None
         if leg.delta is not None:

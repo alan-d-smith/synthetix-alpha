@@ -9,7 +9,7 @@ import pandas as pd
 
 from synthetix_alpha import config
 
-FILES = {"VIX": "VIXCLS", "VXN": "VXNCLS"}
+FILES = {"VIX": "VIXCLS", "VXN": "VXNCLS", "VXV": "VXVCLS", "NFCI": "NFCI"}  # VXV = 3-month S&P vol
 INDEX_FOR = {"SPY": "VIX", "QQQ": "VXN"}  # only these two have an index that measures the same asset
 DIR = config.ROOT / "datasets"
 

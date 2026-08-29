@@ -10,7 +10,7 @@ from typing import Optional, Union
 LEG_TYPES = ("call", "put", "stock")
 SIDES = ("long", "short")
 FEATURES = ("iv_rank", "atm_iv", "rv20", "iv_rv_ratio", "mom20", "sma50_ratio", "sma200_ratio", "skew25",
-            "term_slope", "rsi", "bollinger_pos", "macd", "vix", "vix_rank", "vix_rv_ratio", "rvol", "vwap_dev")
+            "term_slope", "rsi", "bollinger_pos", "macd", "vix", "vix_rank", "vix_rv_ratio", "rvol", "vwap_dev", "vix_term", "nfci")
 SIZING = ("max_loss", "margin", "notional")
 
 
@@ -46,6 +46,7 @@ class Spec:
     commission: float = 0.65  # per contract per leg, each way
     slippage: float = 0.5  # fraction of the half-spread paid on each leg fill
     min_bid: float = 0.05
+    min_volume: float = 0.0  # contracts traded that day; ignored where the source has no volume
     min_credit: Optional[float] = None  # credit structures only: skip entries where credit / max_loss < this
 
     def __post_init__(self):

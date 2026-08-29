@@ -18,7 +18,8 @@ TABLE = Path("docs/progress.md")
 HEADER = """# Strategy progress log
 
 Each row beat every candidate evaluated before it, so this is the improvement path of the search rather than a list of
-everything tried. Appended by `python -m synthetix_alpha.strategy.progress <spec.json> --gen N`; the full history,
+everything tried. Rows marked ⚠ are corrections: the same strategy restated after an engine change, kept even when the
+score falls, because a number that is no longer believed should not remain the headline. Appended by `python -m synthetix_alpha.strategy.progress <spec.json> --gen N`; the full history,
 including evaluations that did not improve, stays in the append-only `progress.jsonl` beside this file.
 
 Score is the search's selection score:
@@ -31,7 +32,7 @@ scoring -9. Return is the mean across the underlyings traded, each on its own $1
 
 
 def entry(spec: Spec, results: dict, gen: int, note: str = "", when: Optional[dt.datetime] = None,
-          source: str = "kaggle") -> dict:
+          source: str = "kaggle", correction: bool = False) -> dict:
     s = results["summary"]
     total = sum(m["total_return"] for m in results["results"].values()) / max(len(results["results"]), 1)
     return {"evaluated_utc": (when or dt.datetime.now(dt.timezone.utc)).strftime("%Y-%m-%d %H:%M"),
@@ -39,7 +40,7 @@ def entry(spec: Spec, results: dict, gen: int, note: str = "", when: Optional[dt
             "total_return": round(total, 4), "mean_sharpe": round(s["mean_sharpe"], 3),
             "min_sharpe": round(s["min_sharpe"], 3), "worst_drawdown": round(s["worst_drawdown"], 4),
             "worst_year": round(s["worst_year"], 4), "trades": s["total_trades"],
-            "score": round(score(s), 3), "note": note}
+            "score": round(score(s), 3), "note": note, "correction": correction}
 
 
 def append(rows: list[dict], log: Path = LOG) -> None:
@@ -56,10 +57,11 @@ def load(log: Path = LOG) -> list[dict]:
 
 
 def improvements(rows: list[dict]) -> list[dict]:
-    """Rows that beat every earlier score, in evaluation order."""
+    """Rows that beat every earlier score, plus corrections. A correction restates a score on a changed engine, so it
+    resets the bar rather than being filtered out for being lower."""
     best, out = None, []
     for r in sorted(rows, key=lambda r: (r["evaluated_utc"], r["strategy"])):
-        if best is None or r["score"] > best:
+        if r.get("correction") or best is None or r["score"] > best:
             best, _ = r["score"], out.append(r)
     return out
 
@@ -70,7 +72,8 @@ def render(log: Path = LOG, table: Path = TABLE) -> Path:
     md = HEADER + "".join(
         f"| {r['evaluated_utc']} | {r['gen']} | `{r['strategy']}` | {r['underlyings']} | {r['total_return']:+.1%} | "
         f"{r['mean_sharpe']:.2f} | {r['min_sharpe']:.2f} | {r['worst_drawdown']:.1%} | {r['worst_year']:+.1%} | "
-        f"{r['trades']} | **{r['score']:+.3f}** | {r.get('note', '')} |\n" for r in kept)
+        f"{r['trades']} | **{r['score']:+.3f}** | {'!! ' if r.get('correction') else ''}{r.get('note', '')} |\n"
+        for r in kept)
     if kept:
         md += (f"\n{len(kept)} improvements across {len(rows)} logged evaluations; "
                f"score {kept[0]['score']:+.3f} -> {kept[-1]['score']:+.3f}, "
@@ -86,10 +89,11 @@ def main() -> None:
     ap.add_argument("--gen", type=int, default=0)
     ap.add_argument("--note", default="")
     ap.add_argument("--source", default="kaggle", choices=["kaggle", "dolt"])
+    ap.add_argument("--correction", action="store_true", help="a restated score on a changed engine; always rendered")
     a = ap.parse_args()
     if a.spec:
         spec = Spec.load(a.spec)
-        append([entry(spec, backtest(spec, source=a.source), a.gen, a.note, source=a.source)])
+        append([entry(spec, backtest(spec, source=a.source), a.gen, a.note, source=a.source, correction=a.correction)])
     print(render())
 
 

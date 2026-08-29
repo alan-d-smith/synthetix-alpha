@@ -45,5 +45,6 @@
   "commission": 0.65,
   "slippage": 0.5,
   "min_bid": 0.05,
+  "min_volume": 25.0,
   "min_credit": 0.05
 }

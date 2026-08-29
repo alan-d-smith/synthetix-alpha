@@ -85,10 +85,10 @@ Put credit **vertical** on SPY and QQQ — single expiry, so one standard 2-leg 
 - **Structure** — sell the 20-delta put, buy the 10-delta put, same expiry, ~65 DTE (40–90 window).
 - **Exits** — take profit at 65% of the credit, stop at 2× credit, close at 21 DTE.
 - **Sizing** — 3% of equity at risk per position against payoff-grid max loss; skip entries whose credit is under
-  5% of max loss.
+  5% of max loss, or whose contracts traded fewer than 25 times that day.
 
-In-sample: mean Sharpe 1.15, max drawdown 1.4%, positive every year including 2022, 102 trades. P&L is well spread —
-the top 5 of 65 SPY trades are only 15% of total profit.
+In-sample: mean Sharpe **0.92**, max drawdown 2.0%, 102 trades, after the same-day liquidity floor described below.
+(Without that floor it reads 1.15, which the liquidity evidence says is not achievable.)
 
 **The double gate is index-only.** `vix_rv_ratio` compares an index's implied vol to that same index's realised vol, so
 it exists for SPY and QQQ and nothing else — dividing VIX by a single stock's realised vol is not a meaningful ratio,
@@ -123,6 +123,37 @@ Alternates kept for regime coverage: `put_diagonal_ivrv_robust.json` (189 trades
 - **Out-of-sample is materially weaker than in-sample** (Sharpe 0.49–0.65 vs 1.13). Expect the lower number live.
 - **Single names are the least validated part.** The condor line fails outright on AAPL (score −2.05) and the robust
   diagonal scores −0.75 there; only the vertical holds up out-of-sample on a single name.
+
+## The liquidity check that changed the headline number
+
+Kaggle's chains carry per-contract volume, which the engine originally discarded. Joining it back to the trade log
+asked a question no feature test can: **were the contracts this strategy picked actually tradable?**
+
+| contracts on the day they were traded | share of legs |
+|---|---|
+| volume = 0 | **9.8%** |
+| volume < 10 | 34.3% |
+| volume < 100 | 67.6% |
+
+Median volume was 31 contracts, and the median quoted spread 0.9% of mid. A mid-price fill in a contract that did not
+trade at all that day is not a fill; it is a quote. So `min_volume` was added to the spec and the deployed rule now
+requires 25 contracts of same-day volume — at 2–3 contracts per position that keeps the order near a tenth of the day's
+flow.
+
+| `min_volume` | score | mean Sharpe | min Sharpe | trades |
+|---|---|---|---|---|
+| 0 (original) | +1.112 | 1.15 | 1.14 | 102 |
+| 10 | +0.653 | 0.99 | 0.85 | 102 |
+| **25 (deployed)** | **+0.520** | **0.92** | **0.70** | 102 |
+| 100 | −0.265 | 0.53 | −0.22 | 99 |
+
+The trade *count* barely moves, so this is not a sample-size effect — the filter changes **which strike** is selected,
+and the liquid strikes perform worse. Part of the original headline came from contracts whose mid price was a
+quote-derived fiction.
+
+The strongest evidence that this correction is right: **the in-sample/out-of-sample gap closed.** Before the filter,
+in-sample Sharpe 1.15 against 0.67 out-of-sample. After it, 0.92 against the same 0.67. Filtering removed illusion
+rather than edge, and the honest expectation for live trading is now roughly what the out-of-sample data always said.
 
 ## Do technical indicators help? Tested, and mostly no
 

@@ -13,7 +13,7 @@ from gs_quant.timeseries.technicals import bollinger_bands, macd, relative_stren
 from synthetix_alpha import config
 from synthetix_alpha.data import kaggle, vix
 
-COLS = ["expiration", "type", "strike", "bid", "ask", "mid", "iv", "delta", "underlying_price"]
+COLS = ["expiration", "type", "strike", "bid", "ask", "mid", "iv", "delta", "volume", "underlying_price"]
 CACHE = config.ROOT / "datasets" / "cache" / "engine"
 DOLT_START = dt.date(2019, 2, 9)
 NY = ZoneInfo("America/New_York")
@@ -27,7 +27,7 @@ def build(underlying: str, source: str = "kaggle") -> tuple[pd.DataFrame, pd.Dat
         raise ValueError(f"no {source} chains for {underlying}")
     df["dte"] = (pd.to_datetime(df["expiration"]) - pd.to_datetime(df["date"])).dt.days.astype("int16")
     df = df[df["dte"] > 0]
-    for c in ("strike", "bid", "ask", "mid", "iv", "delta", "underlying_price"):
+    for c in ("strike", "bid", "ask", "mid", "iv", "delta", "volume", "underlying_price"):
         df[c] = df[c].astype("float32")
     df["type"] = df["type"].astype("category")
     return df.set_index("date"), features(df, spot, underlying)
@@ -83,6 +83,13 @@ def underlying_flow(underlying: Optional[str], index) -> pd.DataFrame:
                          "vwap_dev": ((close - vwap) / vwap).reindex(index)}, index=index)
 
 
+def _safe(fn, *a):
+    try:
+        return fn(*a)
+    except (FileNotFoundError, KeyError):
+        return None
+
+
 def vol_index(underlying: Optional[str], index, rv20: pd.Series) -> pd.DataFrame:
     """VIX level and long-history percentile as market regime; the IV/RV ratio only where the index matches."""
     if underlying is None:
@@ -94,6 +101,11 @@ def vol_index(underlying: Optional[str], index, rv20: pd.Series) -> pd.DataFrame
     rank = s.rank(pct=True)  # ranked over 1990+ (VIX) / 2001+ (VXN), not a 252-day window
     aligned = s.reindex(index).ffill()
     out = {"vix": aligned, "vix_rank": rank.reindex(index).ffill()}
+    for name, series in (("vix_term", _safe(vix.load, "VXV")), ("nfci", _safe(vix.load, "NFCI"))):
+        if series is not None:
+            v = series.reindex(index).ffill()
+            out[name] = aligned / v if name == "vix_term" else v * 100  # load() divides by 100; NFCI is an index
+
     if matched:  # index IV over a different name's realised vol is not a ratio worth having
         out["vix_rv_ratio"] = aligned / rv20
     return pd.DataFrame(out, index=index)

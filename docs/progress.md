@@ -1,7 +1,8 @@
 # Strategy progress log
 
 Each row beat every candidate evaluated before it, so this is the improvement path of the search rather than a list of
-everything tried. Appended by `python -m synthetix_alpha.strategy.progress <spec.json> --gen N`; the full history,
+everything tried. Rows marked ⚠ are corrections: the same strategy restated after an engine change, kept even when the
+score falls, because a number that is no longer believed should not remain the headline. Appended by `python -m synthetix_alpha.strategy.progress <spec.json> --gen N`; the full history,
 including evaluations that did not improve, stays in the append-only `progress.jsonl` beside this file.
 
 Score is the search's selection score:
@@ -19,5 +20,6 @@ scoring -9. Return is the mean across the underlyings traded, each on its own $1
 | 2026-08-29 13:11 | 3 | `robust_diag_v1` | SPY+QQQ+NVDA | +7.0% | 1.13 | 1.01 | -2.3% | +0.6% | 189 | **+1.012** | gen 3: robustness-tuned diagonal, 189 trades |
 | 2026-08-29 13:12 | 3 | `vertical_ivrv_v0` | SPY+QQQ | +6.7% | 1.14 | 1.11 | -1.4% | +0.3% | 104 | **+1.089** | gen 3 winner: re-centred to the 55-70 DTE plateau; DEPLOYED |
 | 2026-08-29 15:20 | 4 | `put_vertical_ivrv` | SPY+QQQ | +6.7% | 1.15 | 1.14 | -1.4% | +0.4% | 102 | **+1.112** | gen 4: require VIX/VXN to confirm the chain-derived vol gate (index-only) |
+| 2026-08-29 16:59 | 4 | `put_vertical_ivrv` | SPY+QQQ | +5.7% | 0.92 | 0.70 | -2.0% | -1.5% | 102 | **+0.520** | !! liquidity floor: require 25 contracts traded that day. 9.8% of earlier fills were in contracts with ZERO volume; the in-sample/OOS gap narrowed 1.15/0.67 -> 0.92/0.67 |
 
-9 improvements across 13 logged evaluations; score -1.180 -> +1.112, mean Sharpe -0.13 -> 1.15.
+10 improvements across 14 logged evaluations; score -1.180 -> +0.520, mean Sharpe -0.13 -> 0.92.
