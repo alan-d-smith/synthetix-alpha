@@ -1,7 +1,6 @@
 import datetime as dt
 import json
 
-import pytest
 
 from synthetix_alpha.research import arxiv, loop
 
