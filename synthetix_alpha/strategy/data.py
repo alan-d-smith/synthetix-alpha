@@ -63,6 +63,7 @@ def features(df: pd.DataFrame, spot: Optional[pd.Series] = None, underlying: Opt
     f["iv_rank"] = f["atm_iv"].rolling(252, min_periods=60).rank(pct=True)
     f["iv_rv_ratio"] = f["atm_iv"] / f["rv20"]
     f["term_slope"] = f["far_iv"] - f["atm_iv"]
+    f["days_since_shock"] = days_since_shock(f["spot"], f["rv20"])
     return f.drop(columns="far_iv").join(technicals(f["spot"])).join(vol_index(underlying, f.index, f["rv20"])).join(underlying_flow(underlying, f.index)).join(earnings(underlying, f.index)).join(macro_events(f.index))
 
 
@@ -127,6 +128,16 @@ def vol_index(underlying: Optional[str], index, rv20: pd.Series) -> pd.DataFrame
     if matched:  # index IV over a different name's realised vol is not a ratio worth having
         out["vix_rv_ratio"] = aligned / rv20
     return pd.DataFrame(out, index=index)
+
+
+def days_since_shock(spot: pd.Series, rv20: pd.Series, k: float = 3.0, horizon: int = 120) -> pd.Series:
+    """Trading days since the last volatility quake, a move beyond k sigma of vol as known the prior day."""
+    ret = spot.pct_change()
+    sigma = (rv20.shift(1) / np.sqrt(252)).replace(0, np.nan)
+    shock = (ret.abs() > k * sigma).fillna(False)
+    idx = pd.Series(range(len(spot)), index=spot.index)
+    last = idx.where(shock).ffill()
+    return (idx - last).where(lambda d: d <= horizon).astype("float64")
 
 
 def technicals(spot: pd.Series) -> pd.DataFrame:

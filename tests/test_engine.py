@@ -79,3 +79,15 @@ def test_min_credit_filter():
     assert run(spec, make_data([410.0] * 5)).metrics["n_trades"] == 0
     spec.min_credit = 0.2
     assert run(spec, make_data([410.0] * 5)).metrics["n_trades"] == 1
+
+
+def test_days_since_shock_is_lookahead_free():
+    import numpy as np
+    import pandas as pd
+    from synthetix_alpha.strategy.data import days_since_shock
+    idx = pd.date_range("2021-01-01", periods=10, freq="D")
+    spot = pd.Series([100, 100, 100, 100, 90, 91, 92, 93, 94, 95], index=idx, dtype=float)
+    rv = pd.Series(0.16, index=idx)  # ~1% daily sigma, so the -10% day is a shock
+    d = days_since_shock(spot, rv, k=3.0)
+    assert d.iloc[4] == 0 and d.iloc[5] == 1 and d.iloc[7] == 3
+    assert np.isnan(d.iloc[0])  # nothing before the first shock

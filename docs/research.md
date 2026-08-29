@@ -486,3 +486,39 @@ and the fastest hiking cycle in forty years. FOMC meetings in that window were g
 would have revealed that.
 
 `days_to_fomc` and the FOMC calendar stay in the codebase. The deployed rule does not use them.
+
+## Five paper ideas, tested and rejected
+
+The loop now triages candidates with an agent rather than keywords, judging each abstract against what the Spec DSL
+can actually express. Of 60 candidates drawn from a 165-paper pool, exactly one was both testable and structurally
+unexplored — which is itself the useful finding: most q-fin preprints need intraday data, dynamic hedging,
+cross-sectional ranking or surface calibration, none of which this engine has.
+
+| source | idea | outcome |
+|---|---|---|
+| [2608.24786](https://arxiv.org/abs/2608.24786) Wysocki | Edge Allocation: size proportional to (IV−RV)/RV | −0.03 to −0.10, rejected |
+| [2608.10693](https://arxiv.org/abs/2608.10693) When the Fed Speaks | avoid entry near scheduled FOMC | +0.50 in sample, **fails out of sample** (Sharpe 0.43 vs 0.67) |
+| [2608.12493](https://arxiv.org/abs/2608.12493) Che & Das | sell at the variance "velocity trough" | **claim refuted** — no trough at the predicted −4% |
+| [2608.20020](https://arxiv.org/abs/2608.20020) Carvalho | harvest concentrated at high VIX | within noise |
+| [1006.1882](https://arxiv.org/abs/1006.1882) Petersen et al. | Omori shock-clock: sell into post-shock vol decay | no usable gain; the promising window was small-sample noise |
+
+Two are worth spelling out because they show the verification actually biting.
+
+**The FOMC gate looked right in every way that is supposed to be convincing** — monotone in gate width, a confirming
+inverse test, fragility improving from 0.43 to 0.92 — and still failed out of sample. The in-sample window, 2020-2022,
+contains the COVID emergency cuts and the fastest hiking cycle in forty years, so FOMC meetings there were genuinely
+exceptional; in 2023-2026 they were not.
+
+**The Omori shock-clock is the cleanest small-sample trap in the project.** A 5-40 day post-shock entry window gave the
+highest mean Sharpe of anything tested, 1.05 against the incumbent's 0.92 — on 33 trades. Extended to five underlyings
+it collapses to 0.42 on 35 trades. The shock detector itself works: 14 volatility quakes on SPY over 2020-2022, and
+they are the recognisable ones (the COVID crash, GameStop, Omicron, Jackson Hole).
+
+Three capabilities came out of these tests and stay in the engine because they are correct and cheap, even though the
+deployed rule uses none of them: `size_scale` (signal-conditional sizing, from Wysocki), `days_to_fomc` (with a
+verified FOMC calendar, from When the Fed Speaks), and `days_since_shock` (from Petersen et al.).
+
+The honest conclusion after five faithful tests is unchanged from the power analysis: with about 37 independent
+holding periods this sample cannot resolve the size of effect these papers offer. The loop is working — it is
+rejecting things that deserve rejection. Finding a real attributable improvement needs more option-chain history far
+more than it needs more papers.
