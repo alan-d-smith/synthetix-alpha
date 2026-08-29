@@ -220,5 +220,5 @@ __marimo__/
 # IDE
 .idea/
 datasets/*
-!datasets/VIXCLS.csv
-!datasets/VXNCLS.csv
+!datasets/VIXCLS.parquet
+!datasets/VXNCLS.parquet

@@ -9,17 +9,18 @@ import pandas as pd
 
 from synthetix_alpha import config
 
-FILES = {"VIX": "VIXCLS.csv", "VXN": "VXNCLS.csv"}
+FILES = {"VIX": "VIXCLS", "VXN": "VXNCLS"}
 INDEX_FOR = {"SPY": "VIX", "QQQ": "VXN"}  # only these two have an index that measures the same asset
 DIR = config.ROOT / "datasets"
 
 
 def load(index: str = "VIX", directory: Optional[Path] = None) -> pd.Series:
-    """Daily close as a decimal (0.18 = 18 vol), indexed by date."""
-    path = Path(directory or DIR) / FILES[index.upper()]
-    df = pd.read_csv(path, parse_dates=["observation_date"])
+    """Daily close as a decimal (0.18 = 18 vol), indexed by date. Parquet is committed; raw FRED CSV also works."""
+    stem = Path(directory or DIR) / FILES[index.upper()]
+    parquet = stem.with_suffix(".parquet")
+    df = pd.read_parquet(parquet) if parquet.exists() else pd.read_csv(stem.with_suffix(".csv"))
     s = pd.to_numeric(df.iloc[:, 1], errors="coerce") / 100.0
-    s.index = df["observation_date"].dt.date
+    s.index = pd.to_datetime(df["observation_date"]).dt.date
     return s.dropna().rename(index.upper())
 
 
