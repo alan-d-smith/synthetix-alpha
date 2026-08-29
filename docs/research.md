@@ -454,3 +454,35 @@ a chain (named by two papers), per-contract greeks beyond delta (already in the 
 
 Every spec carries its origin in `Spec.source` as `arXiv:<id> <title>`, so any result stays traceable to the paper it
 came from. Papers already read are recorded in `docs/papers.jsonl`.
+
+## FOMC event risk: a paper-led hypothesis, rejected out of sample
+
+The largest effect measured anywhere in this project is earnings avoidance on single names (+0.99). Indices have no
+earnings, but they do have scheduled monetary policy. [arXiv:2608.10693](https://arxiv.org/abs/2608.10693), *When the
+Fed Speaks: Dynamics and Forecasts of the Volatility Surface*, states the mechanism directly: implied vol rises into
+scheduled FOMC meetings, most strongly for short-dated OTM options in high-volatility regimes. That predicts the
+earnings result should have an index analogue.
+
+FOMC statement dates were scraped from federalreserve.gov (`synthetix_alpha/data/fomc.py`, 95 dates 2016-2026,
+verified at exactly 8 per year except 2020's 7 after the cancelled March meeting) and added as `days_to_fomc`.
+
+In sample the hypothesis looked strong, and looked strong in the specific ways that are supposed to be convincing:
+
+| FOMC gate | score | mean Sharpe | min Sharpe |
+|---|---|---|---|
+| incumbent, no gate | +0.520 | 0.92 | 0.70 |
+| avoid entry within 7 days | +0.684 | 0.96 | 0.92 |
+| avoid entry within 14 days | **+1.015** | 1.09 | 1.00 |
+| only enter within 14 days (inverse) | −0.049 | 0.49 | 0.03 |
+
+Monotone in the gate width, a confirming inverse test, and fragility improving from a median of 0.43 to 0.92.
+
+**It failed out of sample and was rejected.** On the independent Dolt data the gated rule scores −0.287 with Sharpe
+0.433, against the ungated incumbent's +0.202 and Sharpe 0.67, and is positive in only 3 of 8 years.
+
+The likely reason is worth recording: the in-sample window, 2020-2022, contains the emergency cuts of the COVID crash
+and the fastest hiking cycle in forty years. FOMC meetings in that window were genuinely exceptional events; in the
+2023-2026 out-of-sample period they were not. The effect was regime-specific, and no amount of in-sample confirmation
+would have revealed that.
+
+`days_to_fomc` and the FOMC calendar stay in the codebase. The deployed rule does not use them.

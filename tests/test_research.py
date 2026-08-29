@@ -92,3 +92,24 @@ def test_evaluate_reports_source(tmp_path):
          underlyings=["SPY"], source="arXiv:9999.1 Demo").save(tmp_path / "paper_demo.json")
     rows = loop.evaluate(tmp_path, incumbent=None, log=False)
     assert rows[0].get("source") == "arXiv:9999.1 Demo"
+
+
+def test_fomc_parsers():
+    from synthetix_alpha.data import fomc
+    cur = ('<div class="panel panel-default"><div>2022 FOMC Meetings</div>'
+           '<div class="fomc-meeting__month"><strong>January</strong></div><div class="fomc-meeting__date">25-26</div>'
+           '<div class="fomc-meeting__month"><strong>August</strong></div><div class="fomc-meeting__date">22</div>(notation vote)</div>')
+    assert [d.isoformat() for d in fomc.parse(cur)] == ["2022-01-26"]  # notation votes are not statements
+    hist = ("<h5>January 30-31 Meeting - 2018</h5><h5>Jul/Aug 31-1 Meeting - 2018</h5>"
+            "<h5>March 15 (unscheduled) Meeting - 2020</h5>")
+    assert [d.isoformat() for d in fomc.parse_historical(hist)] == ["2018-01-31", "2018-08-01"]
+
+
+def test_days_to_fomc(tmp_path):
+    import datetime as dt
+    import pandas as pd
+    from synthetix_alpha.data import fomc
+    cache = tmp_path / "f.parquet"
+    pd.DataFrame({"date": [dt.date(2022, 1, 26), dt.date(2022, 3, 16)]}).to_parquet(cache, index=False)
+    d = fomc.days_to_fomc([dt.date(2022, 1, 20), dt.date(2022, 1, 26), dt.date(2022, 2, 1)], cache=cache)
+    assert list(d) == [6.0, 0.0, 43.0]
