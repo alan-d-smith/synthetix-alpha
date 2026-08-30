@@ -222,4 +222,7 @@ __marimo__/
 datasets/*
 !datasets/VIXCLS.parquet
 !datasets/VXNCLS.parquet
+!datasets/options/.gitkeep
 .clinerules
+results/**/*.json
+!results/.gitkeep
