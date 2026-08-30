@@ -769,3 +769,28 @@ of millions unrealised — so they measure who holds a token that pumped, not wh
 Not deployed. A fair persistence test needs realised-PnL rankings over disjoint multi-day windows, or raw wallet
 history from a tier that permits it.
 
+### What the gap-fade sleeve should be expected to earn now
+
+Two checks were run before trusting the deployed number.
+
+**Execution fidelity.** The backtest buys at the official open, but live the sleeve ranks on the opening print and
+sends a market order seconds later. Measured on minute bars, that delay does not cost anything — entering at 09:31
+scored **+4.6%/yr better** than the open itself, with 09:35 and 09:45 similar, and only from 10:00 onward does the
+edge fade. The opening auction price is often an overshoot that partly reverts in the first minute, so the live
+entry is, if anything, slightly favoured. Exiting market-on-close remains the right choice.
+
+**Recent regime.** The headline Sharpe of 1.27 is a five-year figure, and the trailing year is materially weaker:
+
+| universe | period | ann. return | Sharpe |
+|---|---|---|---|
+| 34 names | trailing year | 3.11% | 0.21 |
+| 34 names | 5 years | 18.85% | 1.06 |
+| 80 names | trailing year | 7.09% | 0.44 |
+| 80 names | 5 years | **21.32%** | **1.27** |
+
+Universe breadth accounts for part of the gap — ten names chosen from eighty is a more selective basket than ten from
+thirty-four, and it helps in both periods — but the period accounts for more. This is inside the strategy's historical
+year-to-year variation rather than clear decay: 2024 returned 8.6% and 2026 8.4%, while 2022, 2023 and 2025 carried
+the average. It does mean the honest expectation for any given week is closer to the 0.44 regime than the 1.27
+headline, and the deployed size is set with that in mind rather than the five-year figure.
+
