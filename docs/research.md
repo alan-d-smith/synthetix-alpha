@@ -876,3 +876,28 @@ These snapshots recorded `net_usd` only: the collector process had imported the 
 were added, so nine hours of data sit on the confounded metric. It now records `edge` and also tracks SOL, whose
 0.15% Alpaca round-trip is the one cost structure where a copied edge could survive.
 
+## Running the options and gap-fade sleeves together
+
+The two deployed sleeves had never been measured against each other. They should diversify well by construction: one
+sells volatility over weeks, the other is flat by every close. Over the 313 days where both have data
+(2021-09 to 2022-12, the limit being Kaggle's option chains):
+
+| | Sharpe | ann. return | max drawdown |
+|---|---|---|---|
+| options sleeve alone | 0.95 | — | — |
+| gap fade alone | 1.27 | — | — |
+| 25% options / 75% gap fade | 1.31 | **19.52%** | −8.89% |
+| 50 / 50 | 1.37 | 14.41% | −6.13% |
+| 75% options / 25% gap fade | **1.41** | 9.30% | −3.31% |
+
+Correlation is **+0.279**, and every blend beats both standalone sleeves. As with the earlier sleeve combinations,
+this is arithmetic rather than inference: the diversification identity predicts a 50/50 Sharpe of 1.39 against a
+measured 1.37, a difference of 0.018, so it carries no burden of clearing the 0.54 noise floor.
+
+Sharpe rises monotonically toward the options-heavy end while return falls, so the weight is a risk preference rather
+than an optimum to be solved for. The live runner already holds both — roughly 36% of NAV at risk in defined-risk
+spreads and 40% of NAV in intraday notional that is flat overnight — which sits near the middle of that table.
+
+The estimate rests on one regime. The overlap is a single bear-market stretch, and correlations between a
+short-volatility book and an intraday equity book are exactly the kind that rise in a crash.
+
