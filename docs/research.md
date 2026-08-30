@@ -901,3 +901,47 @@ spreads and 40% of NAV in intraday notional that is flat overnight — which sit
 The estimate rests on one regime. The overlap is a single bear-market stretch, and correlations between a
 short-volatility book and an intraday equity book are exactly the kind that rise in a crash.
 
+## Why every crypto strategy tested dies in the same place
+
+If the persistent on-chain wallets earn their money as makers, the obvious question is why not make markets too. The
+answer is the fee schedule. Alpaca charges **0.15% maker with no rebate** at the entry volume tier, so capturing a
+spread costs 0.30% in fees:
+
+| pair | spread | 2x maker fee | net |
+|---|---|---|---|
+| BTC, ETH | 0.03% | 0.30% | −0.27% |
+| SOL | 0.08% | 0.30% | −0.22% |
+| TRUMP | 0.29% | 0.30% | −0.01% |
+| BONK | 1.01% | 0.30% | +0.71% |
+
+Fees exceed the entire spread on every liquid pair, before adverse selection — which is the actual cost of making,
+since a resting quote fills precisely when the price is about to move through it. Only BONK shows positive, and only
+because it is illiquid enough that the fills would be overwhelmingly informed.
+
+Seven approaches have now been tested and none clears the bar:
+
+| approach | result |
+|---|---|
+| wallet copy-trading | persistence real (87%) but edge 22-44bps against 59-202bps cost |
+| market making | 30bps of fees against 3-33bps of spread |
+| cross-sectional momentum (daily) | t = 0.93 |
+| cross-sectional reversal (daily) | negative at every lookback |
+| trend following | mean Sharpe 0.44 across 9 assets, exactly equal to buy-and-hold |
+| hourly cross-sectional momentum | gross 38-53%/yr, but turnover of 1.4 per rebalance costs ~51%/yr |
+| threshold dip-buying | best t = 2.08, chosen from 18 configurations, on 50 trades |
+
+The common cause is turnover priced at 15-25bps a side. The hourly momentum result makes it clearest: gross returns
+of 38-53% a year are genuinely there, and rotating a three-asset basket every 24-72 hours hands all of it to fees.
+
+Two of these deserve a note on method. The trend-following result was found first on BTC alone at Sharpe 1.37 with a
+swept moving-average length that peaked rather than plateaued; testing the same rule across nine assets brought the
+mean to 0.44, equal to buy-and-hold, with LTC at −0.61. Cross-asset validation caught what parameter-sweeping on one
+asset would have shipped. The dip-buying result first appeared with t-statistics between 100 and 180, which are not
+findings but a symptom of overlapping observations — slow-moving signals sampled hourly against 24-hour forward
+windows, across assets that move together. Re-run as a portfolio with non-overlapping holds, the same configuration
+gives t = 2.08.
+
+Intraday crypto is not inherently unprofitable; it is unprofitable *for us*, because the patterns live at horizons
+where 30-50bps of round-trip cost consumes the move. Changing that answer needs a lower fee tier (maker falls to
+0.08% above $1M of 30-day volume) or an edge large enough that 50bps is noise. Nothing here is deployed.
+
