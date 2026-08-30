@@ -23,7 +23,7 @@ MULT = 100
 
 
 def plan_one(symbol: str, spec: Spec, equity: float, client: AlpacaClient,
-             risk_cap: Optional[float] = None) -> Optional[dict]:
+             risk_cap: Optional[float] = None, min_fill_ratio: float = 0.6) -> Optional[dict]:
     """Select legs on the live chain and size them, or None when the chain cannot support the spread.
 
     Sizing takes the lower of the spec's risk_fraction and the live per-position cap, so the governance
@@ -47,6 +47,14 @@ def plan_one(symbol: str, spec: Spec, equity: float, client: AlpacaClient,
     entry = sum(l.side * l.ratio * l.mark for l in legs)  # negative = net credit
     if -entry < spec.min_credit:
         return {"skip": f"credit {-entry:.2f} < {spec.min_credit}"}
+    # A mid-price limit on an illiquid spread either sits unfilled or has to cross a bid-ask worth more than
+    # the credit itself. Only take spreads that still pay after crossing.
+    fill = 0.0
+    for leg in legs:
+        row = chain.loc[leg.symbol]
+        fill += (-float(row["bid"]) if leg.side < 0 else float(row["ask"])) * leg.ratio
+    if -fill < min_fill_ratio * -entry or -fill < spec.min_credit:
+        return {"skip": f"credit {-entry:.2f} at mid but {-fill:.2f} after crossing"}
     loss = engine.max_loss(legs, entry, spot)
     if risk_cap is not None and risk_cap < spec.risk_fraction:
         spec = replace(spec, risk_fraction=risk_cap)
@@ -59,7 +67,8 @@ def plan_one(symbol: str, spec: Spec, equity: float, client: AlpacaClient,
             "max_loss": round(loss * MULT * contracts, 2), "defined_risk": True}
 
 
-def plan(limit: int = 5, spec_path: str = SPEC, equity: Optional[float] = None) -> dict:
+def plan(limit: int = 5, spec_path: str = SPEC, equity: Optional[float] = None,
+         min_fill_ratio: float = 0.6) -> dict:
     """Screen, build a spread per candidate, then run the risk gates over the batch."""
     spec = Spec.load(spec_path)
     client = AlpacaClient()
@@ -72,7 +81,7 @@ def plan(limit: int = 5, spec_path: str = SPEC, equity: Optional[float] = None) 
         if len(orders) >= limit:
             break
         try:
-            o = plan_one(sym, spec, nav, client, rules.max_premium_at_risk_pct)
+            o = plan_one(sym, spec, nav, client, rules.max_premium_at_risk_pct, min_fill_ratio)
         except Exception as e:
             o = None
             print(f"  {sym}: {type(e).__name__}: {e}")
