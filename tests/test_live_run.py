@@ -100,15 +100,22 @@ def test_rank_today_needs_history_for_volatility(monkeypatch):
     assert intraday.rank_today(object()).empty
 
 
-def _crypto_panel(drop_pct):
+def _crypto_panel(drop_pct, hours=24 * 9):
+    """Calm and volatile pairs; the calm one slides `drop_pct` over the last 24h, spread across bars.
+
+    Spreading the move matters: concentrating it in one bar inflates the same rolling volatility that
+    divides it, so the z-score saturates instead of growing.
+    """
     import numpy as np
     import pandas as pd
-    idx = pd.date_range("2026-08-01", periods=24 * 9, freq="h", tz="UTC")
+    idx = pd.date_range("2026-08-01", periods=hours, freq="h", tz="UTC")
     rng = np.random.default_rng(0)
-    calm = 100 * np.exp(np.cumsum(rng.normal(0, 0.001, len(idx))))
-    wild = 100 * np.exp(np.cumsum(rng.normal(0, 0.02, len(idx))))
+    calm = 100 * np.exp(np.cumsum(rng.normal(0, 0.001, hours)))
+    wild = 100 * np.exp(np.cumsum(rng.normal(0, 0.02, hours)))
     px = pd.DataFrame({"CALM/USD": calm, "WILD/USD": wild}, index=idx)
-    px.iloc[-1, px.columns.get_loc("CALM/USD")] = px.iloc[-25]["CALM/USD"] * (1 + drop_pct)
+    step = (1 + drop_pct) ** (1 / 24)
+    tail = px["CALM/USD"].iloc[-25] * np.power(step, np.arange(1, 25))
+    px.iloc[-24:, px.columns.get_loc("CALM/USD")] = tail
     return px
 
 

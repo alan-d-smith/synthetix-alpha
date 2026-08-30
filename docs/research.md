@@ -945,3 +945,30 @@ Intraday crypto is not inherently unprofitable; it is unprofitable *for us*, bec
 where 30-50bps of round-trip cost consumes the move. Changing that answer needs a lower fee tier (maker falls to
 0.08% above $1M of 30-day volume) or an edge large enough that 50bps is noise. Nothing here is deployed.
 
+### The one crypto signal that survives: extreme dislocations, rarely
+
+Everything that failed above failed on turnover. The obvious response is to trade far less often and only on much
+larger moves, so the same 30-50bps of cost is spread over a bigger expected gain. Buying pairs whose 24-hour move is
+an extreme multiple of their own hourly volatility, and holding a fixed 24-48 hours, does that. Pooled across 15
+pairs over 719 days, with costs charged as each pair's live spread plus 0.30% of fees:
+
+| z threshold | hold | trades | per year | mean | win | ann | max DD | t | first half | second half |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 2.5 | 48h | 144 | 73 | +0.25% | 51% | 5.2% | −21.2% | 0.58 | +0.90% | −0.40% |
+| 3.0 | 48h | 68 | 35 | +0.56% | 53% | 6.0% | −12.2% | 0.83 | −0.14% | +1.25% |
+| **3.5** | **48h** | **32** | **16** | **+3.82%** | **59%** | **22.2%** | **−6.5%** | **2.85** | **+4.64%** | **+3.01%** |
+| 3.5 | 24h | 32 | 16 | +4.90% | 66% | 29.3% | −3.4% | 3.29 | +8.09% | +1.70% |
+
+The effect strengthens monotonically with the threshold, which is the opposite of the raw-percentage gap thresholds in
+equities and consistent with the cost argument: only moves large enough to dwarf the fee are worth taking. It also
+appeared independently in two universes before being pooled — majors at t = 1.88 and memecoins at t = 2.67 on the same
+pre-specified configuration, the cross-asset check that trend following failed. Both halves of the sample are positive
+for the 48-hour hold, which is why that is the deployed variant rather than the higher-scoring 24-hour one whose
+result is front-loaded.
+
+What it is not: with 32 trades it is a thin sample, and 3.5 was chosen after testing 2.5 and 3.0. At roughly sixteen
+signals a year the expected number of trades in any given week is about 0.3, so this contributes nothing on most
+weeks and occasionally contributes a lot. It is deployed as an opportunistic sleeve at 15% of NAV in
+`synthetix_alpha/live/crypto.py`, sized on the assumption that it is real but rare, and it is currently silent — the
+most dislocated pair sits at z = −0.68.
+
