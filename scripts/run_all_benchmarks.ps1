@@ -46,6 +46,16 @@ function Phase($name, $script) {
     $script:phase++
     Write-Host "`n--- PHASE $phase : $name ---" -ForegroundColor Yellow
     $start = Get-Date
+    try {
+        & $script
+        $elapsed = [math]::Round(((Get-Date) - $start).TotalSeconds, 1)
+        Write-Host "    [$phase] $name : OK ($elapsed s)" -ForegroundColor Green
+    } catch {
+        $elapsed = [math]::Round(((Get-Date) - $start).TotalSeconds, 1)
+        Write-Host "    [$phase] $name : FAILED ($elapsed s) - $_" -ForegroundColor Red
+    }
+}
+
 # ============================================================
 # PHASE 1: Test Suite
 # ============================================================
@@ -77,11 +87,6 @@ if (-not $SkipKaggle) {
         }
     }
 }
-    try {
-        & $script
-        $elapsed = [math]::Round(((Get-Date) - $start).TotalSeconds, 1)
-        Write-Host "    [$phase] $name : OK ($elapsed s)" -ForegroundColor Green
-    } catch {
 # ============================================================
 # PHASE 3: Dolt OOS Backtests (2019-2026)
 # ============================================================
@@ -149,7 +154,3 @@ Write-Host " BENCHMARK SUITE COMPLETE" -ForegroundColor Cyan
 Write-Host " Total time: $totalElapsed s" -ForegroundColor Cyan
 Write-Host " Report: $reportDir\benchmark_report.md" -ForegroundColor Cyan
 Write-Host "============================================================`n" -ForegroundColor Cyan
-        $elapsed = [math]::Round(((Get-Date) - $start).TotalSeconds, 1)
-        Write-Host "    [$phase] $name : FAILED ($elapsed s) - $_" -ForegroundColor Red
-    }
-}

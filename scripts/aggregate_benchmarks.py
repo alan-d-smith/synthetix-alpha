@@ -142,16 +142,33 @@ def aggregate(report_dir: Path) -> str:
     # Readiness
     lines.append("## 4. Institutional Readiness Checklist")
     lines.append("")
+    # Every row below is derived from what the run actually produced. A checklist that prints PASS
+    # regardless of the results is worse than no checklist.
+    repo = Path(__file__).resolve().parents[1]
+    dolt_present = (repo / "datasets" / "options").is_dir()
+    verify_files = list(report_dir.glob("verify_*.json"))
+    verify_ok = [f for f in verify_files if (load_json(f) or {}).get("base_score") is not None]
+    pipeline_logs = list(report_dir.glob("pipeline_*.log"))
+    tail_run = any("tail" in k for k in kaggle_results)
+    underlyings = {u for d in all_results.values() for u in (d.get("results") or {})}
+    failed = [k for k, d in all_results.items() if not (d.get("results") or {})]
+
+    def mark(ok: bool) -> str:
+        return "PASS" if ok else "FAIL"
+
     lines.append("| Check | Status | Notes |")
     lines.append("|---|---|---|")
-    lines.append("| Dolt DB cloned | PASS | `datasets/options/` — 116M rows, 1,500+ names |")
-    lines.append(f"| Kaggle strategies | {len(kaggle_results)} | All specs backtested on EOD chains |")
-    lines.append(f"| Dolt strategies | {len(dolt_results)} | OOS backtest on 2019-2026 coarse surface |")
-    lines.append("| OOS verification | PASS | Fragility sweep + dolt OOS (SPY) |")
-    lines.append("| Pipeline dry-run | PASS | LLM -> Critic -> Risk -> Execution |")
-    lines.append("| 20+ underlyings | PARTIAL | dolt has 1,500+ names; screen needs VIX/VXN for ETFs |")
-    lines.append("| Live paper trading | NEEDS KEYS | 0 days - needs Alpaca keys + pipeline |")
-    lines.append("| Tail event stress test | PASS | `put_vertical_ivrv_tail.json` |")
+    lines.append(f"| Dolt DB cloned | {mark(dolt_present)} | `datasets/options/` "
+                 f"{'present' if dolt_present else 'NOT FOUND'} |")
+    lines.append(f"| Kaggle strategies | {mark(bool(kaggle_results))} | {len(kaggle_results)} backtested on EOD chains |")
+    lines.append(f"| Dolt strategies | {mark(bool(dolt_results))} | {len(dolt_results)} backtested on the coarse surface |")
+    lines.append(f"| OOS verification | {mark(bool(verify_ok))} | {len(verify_ok)} of {len(verify_files)} verify runs produced a score |")
+    lines.append(f"| Pipeline dry-run | {mark(bool(pipeline_logs))} | {len(pipeline_logs)} dry-run log(s) written |")
+    lines.append(f"| Backtests without results | {mark(not failed)} | "
+                 f"{('none' if not failed else ', '.join(sorted(failed)))} |")
+    lines.append(f"| Underlyings covered | {len(underlyings)} | {', '.join(sorted(underlyings)) or 'none'} |")
+    lines.append(f"| Tail event stress test | {mark(tail_run)} | `put_vertical_ivrv_tail.json` "
+                 f"{'ran' if tail_run else 'did not run'} |")
     lines.append("")
 
     report = "\n".join(lines)
