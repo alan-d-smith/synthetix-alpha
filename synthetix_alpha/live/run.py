@@ -13,8 +13,11 @@ from dataclasses import replace
 import pandas as pd
 from typing import Optional
 
+import os
+
+from synthetix_alpha import config
 from synthetix_alpha.data.alpaca import AlpacaClient
-from synthetix_alpha.live import cli, crypto, equity, execution, intraday, risk, screen
+from synthetix_alpha.live import cli, crypto, equity, execution, intraday, risk, screen, window
 from synthetix_alpha.strategy import engine
 from synthetix_alpha.strategy.spec import Spec
 
@@ -94,8 +97,19 @@ def plan(limit: int = 5, spec_path: str = SPEC, equity: Optional[float] = None,
             "approved": decision.approved, "halts": decision.halts}
 
 
+def use_account(name: str) -> None:
+    """Point this process at one account. Everything downstream reads the standard vars, so selecting here
+    means no module can accidentally reach the other account."""
+    key, secret = config.credentials(name)
+    os.environ["ALPACA_API_KEY"], os.environ["ALPACA_API_SECRET"] = key, secret
+    os.environ["ALPACA_SECRET_KEY"] = secret
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--account", choices=["research", "deployed"], default="research")
+    ap.add_argument("--ignore-window", action="store_true",
+                    help="dry runs only: skip the competition window check")
     ap.add_argument("--limit", type=int, default=5)
     ap.add_argument("--spec", default=SPEC)
     ap.add_argument("--execute", action="store_true", help="submit for real (default is a dry run)")
@@ -108,6 +122,18 @@ def main() -> None:
     ap.add_argument("--equity-top", type=int, default=0, help="overnight momentum names (0 disables)")
     ap.add_argument("--equity-budget", type=float, default=0.20, help="fraction of NAV for the momentum sleeve")
     a = ap.parse_args()
+    if a.ignore_window and a.execute:
+        ap.error("--ignore-window cannot be combined with --execute: live orders must respect the window")
+    use_account(a.account)
+    acct = cli.account()
+    print(f"account {acct['account_number']} ({a.account})  equity ${float(acct['equity']):,.2f}  "
+          f"cash ${float(acct['cash']):,.2f}")
+    print(window.describe())
+    gate = window.can_flatten if a.flatten else window.can_enter
+    allowed, why = gate()
+    if not allowed and not a.ignore_window:
+        print(f"REFUSING TO TRADE: {why}")
+        return
     if a.flatten:
         rows = intraday.flatten(dry_run=not a.execute)
         for r in rows:

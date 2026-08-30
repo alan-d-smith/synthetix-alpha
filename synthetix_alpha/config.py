@@ -17,9 +17,17 @@ DOLT_CACHE = ROOT / "datasets" / "cache" / "dolt"
 ALPACA_BIN = os.environ.get("ALPACA_BIN") or shutil.which("alpaca") or str(ROOT / "tools" / "alpaca.exe")
 
 
-def credentials() -> tuple[str, str]:
-    key = os.environ.get("ALPACA_API_KEY")
-    secret = os.environ.get("ALPACA_API_SECRET") or os.environ.get("ALPACA_SECRET_KEY")
+ACCOUNTS = {"research": ("ALPACA_API_KEY", "ALPACA_API_SECRET", "ALPACA_SECRET_KEY"),
+            "deployed": ("ALPACA_DEPLOYED_API_KEY", "ALPACA_DEPLOYED_API_SECRET", None)}
+
+
+def credentials(account: str = "research") -> tuple[str, str]:
+    """Keys for one account. Two are kept apart so a research script cannot reach the judged account."""
+    if account not in ACCOUNTS:
+        raise ValueError(f"unknown account {account!r}, expected one of {sorted(ACCOUNTS)}")
+    key_var, secret_var, alt = ACCOUNTS[account]
+    key = os.environ.get(key_var)
+    secret = os.environ.get(secret_var) or (os.environ.get(alt) if alt else None)
     if not key or not secret:
-        raise RuntimeError("ALPACA_API_KEY / ALPACA_API_SECRET not set (see .env.example)")
+        raise RuntimeError(f"{key_var} / {secret_var} not set for the {account!r} account (see .env.example)")
     return key, secret
