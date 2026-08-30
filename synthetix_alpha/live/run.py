@@ -14,7 +14,7 @@ import pandas as pd
 from typing import Optional
 
 from synthetix_alpha.data.alpaca import AlpacaClient
-from synthetix_alpha.live import cli, equity, execution, intraday, risk, screen
+from synthetix_alpha.live import cli, crypto, equity, execution, intraday, risk, screen
 from synthetix_alpha.strategy import engine
 from synthetix_alpha.strategy.spec import Spec
 
@@ -92,6 +92,8 @@ def main() -> None:
     ap.add_argument("--execute", action="store_true", help="submit for real (default is a dry run)")
     ap.add_argument("--intraday-top", type=int, default=10, help="gap-fade names, flat by the close (0 disables)")
     ap.add_argument("--intraday-budget", type=float, default=0.40, help="fraction of NAV for the intraday sleeve")
+    ap.add_argument("--crypto-budget", type=float, default=0.15,
+                    help="fraction of NAV for the crypto dislocation sleeve (0 disables)")
     ap.add_argument("--equity-top", type=int, default=0, help="overnight momentum names (0 disables)")
     ap.add_argument("--equity-budget", type=float, default=0.20, help="fraction of NAV for the momentum sleeve")
     a = ap.parse_args()
