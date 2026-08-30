@@ -1103,3 +1103,63 @@ a small correction gets mistaken for a large one.
 
 **Deployed portfolio, re-benchmarked:** Sharpe 0.870, max drawdown −5.03%, total return +31.95% over 453 trades.
 
+## Optimal weights, computed: the optimiser loses to equal weight
+
+The allocation question was put to five schemes over the daily returns of the deployed sleeves: equal weight,
+inverse volatility, minimum variance, and the tangency portfolio both unconstrained and long only. In sample the
+ranking is what theory predicts. Out of sample, on a walk-forward that fits weights on everything up to a date and
+trades the next sixty days, it inverts:
+
+| scheme | in-sample Sharpe | out-of-sample Sharpe | OOS return |
+|---|---|---|---|
+| **equal weight** | 1.29 (worst) | **1.56 (best)** | **4.1%** |
+| minimum variance | 1.12 | 1.44 | 5.1% |
+| tangency, long only | 1.34 | 1.42 | 5.2% |
+| tangency | 1.34 | 1.41 | 5.2% |
+| inverse volatility | 1.34 | 0.69 (worst) | 1.7% |
+
+On the wider five-sleeve set the same pattern is sharper still: tangency reaches 4.38 in sample and 1.18 out,
+while equal weight goes 2.56 in and 1.42 out. Fitting more parameters buys in-sample Sharpe and sells the
+out-of-sample kind.
+
+**The differences are not significant, and that is the point.** Over 2.14 years of test data the standard error of
+a Sharpe estimate is 1.02, and the spread between best and worst scheme is 0.71, or 0.69 standard errors. No scheme
+is measurably better than any other. Equal weight is chosen because it ties on evidence and has no parameters to
+estimate, so it cannot degrade the way a fitted allocation does.
+
+The same discipline applies to the sleeve budget. Optimising the gap fade budget on the overlap picks 15%, and a
+walk-forward shows why that is worthless: the fitted budget swings between 10% and 25% depending on the window, and
+delivers a mean out-of-sample Sharpe of **0.56 against 0.92 for a fixed 40% that was never fitted at all**. The
+in-sample optimum sits low only because gap fade returned Sharpe 1.20 in that particular window against 1.61 over
+its full history. The optimiser was fitting an accident of the sample.
+
+### What the budget actually buys
+
+Levering one sleeve does not change its Sharpe, since return and volatility scale together. Standalone, gap fade
+prices identically at every size:
+
+| budget | total P&L | CAGR | Sharpe | max DD | worst day |
+|---|---|---|---|---|---|
+| 40% | +$59,685 | 10.0% | 1.61 | −5.0% | −1.45% |
+| 50% | +$79,002 | 12.6% | 1.61 | −6.2% | −1.81% |
+| 60% | +$100,432 | 15.3% | 1.61 | −7.4% | −2.17% |
+| 70% | +$124,176 | 17.9% | 1.61 | −8.6% | −2.53% |
+
+Inside the book it does change, because the options sleeves are held fixed while only gap fade is levered, and the
+two correlate at just **+0.163**:
+
+| gap fade budget | book P&L | CAGR | Sharpe | max DD |
+|---|---|---|---|---|
+| 0% | +$4,518 | 3.6% | 1.33 | −1.7% |
+| **40%** | +$15,879 | 12.6% | **1.51** | −5.8% |
+| 50% | +$18,789 | 14.9% | 1.47 | −7.0% |
+| 60% | +$21,725 | 17.1% | 1.44 | −8.2% |
+| 70% | +$24,684 | 19.4% | 1.41 | −9.4% |
+
+Adding gap fade at all is worth +0.18 of book Sharpe, which is the diversification the low correlation implies.
+Beyond that the curve is a straight risk-for-return trade: 70% earns 55% more than 40% and draws down 62% deeper.
+That is a risk appetite decision, not something a backtest can settle, and the honest reading of the walk-forward is
+that any fixed choice in this range beats trying to time it.
+
+Reproduce with `python -m synthetix_alpha.strategy.allocate weights` and `... budget`.
+

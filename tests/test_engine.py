@@ -156,3 +156,23 @@ def test_engine_data_exposes_split_dates():
     assert EngineData._load_splits("SPY") == {}, "SPY has never split"
     aapl = EngineData._load_splits("AAPL")
     assert aapl.get(__import__("datetime").date(2020, 8, 31)) == 4.0
+
+
+def test_allocation_schemes_are_normalised_and_equal_is_parameter_free():
+    import numpy as np
+    import pandas as pd
+
+    from synthetix_alpha.strategy import allocate
+    rng = np.random.default_rng(0)
+    R = pd.DataFrame(rng.normal(0.0005, 0.01, (400, 3)), columns=list("abc"))
+    for kind in ("equal", "invvol", "minvar", "tangency_long", "tangency"):
+        w = allocate.weights(R, kind)
+        assert abs(w.sum() - 1) < 1e-9, f"{kind} weights must sum to one"
+    assert np.allclose(allocate.weights(R, "equal"), 1 / 3), "equal weight must ignore the data entirely"
+    assert (allocate.weights(R, "tangency_long") >= 0).all()
+
+
+def test_sharpe_standard_error_grows_as_the_sample_shrinks():
+    from synthetix_alpha.strategy import allocate
+    assert allocate.sharpe_se(1.5, 5.0) < allocate.sharpe_se(1.5, 1.0)
+    assert allocate.sharpe_se(1.5, 0.6) > 1.0, "a sub-year sample cannot resolve Sharpe differences"
