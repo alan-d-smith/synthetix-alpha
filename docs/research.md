@@ -1027,3 +1027,9 @@ today in New York.
 **Neither showed up in testing** because the fixtures were dated in the past and dry-run never exercised the fill
 path. The fixtures now end on the current date, so the freshness guard is exercised the way live runs it.
 
+**The wallet collector was stopped**, for an arithmetic reason rather than an empirical one. It was accumulating
+price-edge data on SOL, the one token whose Alpaca costs looked survivable. But SOL round-trips at 0.08% of spread
+plus 0.30% of fees, and the persistent wallet edges measured 0.22-0.44%. A perfect result lands at break-even, so no
+amount of further collection can change the conclusion. The snapshots already gathered stay in `datasets/wallets/`
+and the decay curve they produced is recorded above.
+
