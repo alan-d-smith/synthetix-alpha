@@ -732,6 +732,27 @@ sample produced a Sharpe that did not survive its own extension.
 
 **Overnight gap fade** survives and is deployed: 1,253 sessions rather than 171, and the detail is in the section above.
 
+It also improved. Ranking the gap in units of each name's own 20-day volatility, rather than raw percent, is the
+single change that takes the excess return over an equal-weight benchmark from insignificant to significant. On 80
+liquid names over 1,234 sessions:
+
+| ranking | basket | ann. return | Sharpe | t (excess) |
+|---|---|---|---|---|
+| raw gap | 10 | 14.60% | 0.72 | 1.05 |
+| raw gap | 20 | 15.57% | 0.91 | 1.76 |
+| **volatility-adjusted** | **5** | **25.88%** | **1.32** | **2.46** |
+| volatility-adjusted | 10 | 21.32% | 1.27 | 2.44 |
+| volatility-adjusted | 20 | 17.04% | 1.13 | 2.23 |
+
+A 2% gap on a calm utility is a far larger shock than a 2% gap on a semiconductor, and the raw ranking could not
+tell them apart. Sharpe is a plateau across basket sizes rather than a spike, positive in 5 of the 6 years, and it
+survives realistic costs — 20.8%/yr at 2bps and 13.3% at 5bps per round trip, breaking even near 10bps. Deployed at
+n=10 for diversification, since 1.27 against 1.32 is well inside noise.
+
+Filtering out the most extreme volatility-adjusted gaps *hurts* (21.3% down to 15-17%), which is the opposite of what
+raw-percent thresholds showed. Once the gap is scaled by the name's own volatility, the large readings are no longer
+predominantly news.
+
 ## Crypto wallet copy-trading: blocked on data, and the first evidence is discouraging
 
 Two APIs were wired and tested. Bitquery works but the available token is realtime-only — `archive` and `combined`

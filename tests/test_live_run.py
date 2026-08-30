@@ -63,21 +63,38 @@ def test_cli_raises_on_error_envelope(monkeypatch):
         cli.account()
 
 
-def test_gap_fade_ranks_worst_gaps_and_is_flat_by_close(monkeypatch):
+def test_gap_fade_ranks_by_volatility_adjusted_gap(monkeypatch):
+    import numpy as np
     import pandas as pd
     from synthetix_alpha.live import intraday
-    idx = [dt.date(2026, 8, 27), dt.date(2026, 8, 28)]
-    op = pd.DataFrame({"A": [100.0, 90.0], "B": [100.0, 99.0], "C": [100.0, 101.0]}, index=idx)
-    cl = pd.DataFrame({"A": [100.0, 95.0], "B": [100.0, 99.5], "C": [100.0, 100.0]}, index=idx)
+    idx = [dt.date(2026, 1, 1) + dt.timedelta(days=i) for i in range(30)]
+    rng = np.random.default_rng(0)
+    # A is calm, B is volatile. On the last day both gap down 2%, so in units of their own
+    # volatility A's gap is the larger shock and must rank first.
+    cl = pd.DataFrame({"A": 100 + rng.normal(0, 0.1, 30).cumsum(),
+                       "B": 100 + rng.normal(0, 3.0, 30).cumsum(),
+                       "C": 100 + rng.normal(0, 1.0, 30).cumsum()}, index=idx)
+    op = cl.shift(1) * 1.001
+    op.iloc[-1] = cl.iloc[-2] * 0.98
+    op.iloc[0] = cl.iloc[0]
     monkeypatch.setattr(intraday, "panels", lambda *a, **k: (op, cl))
     picks = intraday.rank_today(object(), n=2)
-    assert list(picks.index) == ["A", "B"]  # A gapped -10%, B -1%, C +1%
-    orders = intraday.plan(100_000.0, object(), n=2, budget_pct=0.4)
-    assert [o["symbol"] for o in orders] == ["A", "B"]
-    assert sum(o["notional"] for o in orders) <= 100_000.0 * 0.4 + 1
+    assert list(picks.index)[0] == "A", "the calm name's 2% gap is the bigger volatility-adjusted shock"
+    assert "z" in picks.columns and picks["z"].iloc[0] < 0
 
+    orders = intraday.plan(100_000.0, object(), n=2, budget_pct=0.4)
+    assert sum(o["notional"] for o in orders) <= 100_000.0 * 0.4 + 1
     sent = []
     monkeypatch.setattr(intraday.cli, "submit_equity", lambda *a, **k: sent.append(a) or {"status": "accepted"})
     monkeypatch.setattr(intraday.cli, "run", lambda *a, **k: sent.append(a) or {"status": "accepted"})
     intraday.enter(orders[:1], dry_run=True)
     assert any("cls" in a for a in sent), "exit must be market-on-close so the sleeve never holds overnight"
+
+
+def test_rank_today_needs_history_for_volatility(monkeypatch):
+    import pandas as pd
+    from synthetix_alpha.live import intraday
+    idx = [dt.date(2026, 1, 1), dt.date(2026, 1, 2)]
+    short = pd.DataFrame({"A": [100.0, 98.0]}, index=idx)
+    monkeypatch.setattr(intraday, "panels", lambda *a, **k: (short, short))
+    assert intraday.rank_today(object()).empty

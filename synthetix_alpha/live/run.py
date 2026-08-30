@@ -107,7 +107,7 @@ def main() -> None:
         client = AlpacaClient()
         picks = intraday.plan(p["nav"], client, n=a.intraday_top, budget_pct=a.intraday_budget)
         for o in intraday.enter(picks, dry_run=not a.execute):
-            print(f"{o['symbol']:<6} {o['qty']:>5} sh  ${o['notional']:>9,.0f}  gap {o['gap']:+.2%}  "
+            print(f"{o['symbol']:<6} {o['qty']:>5} sh  ${o['notional']:>9,.0f}  gap {o['gap']:+.2%} (z {o['z']:+.1f})  "
                   f"buy {o['buy']} / exit {o['exit']}")
         if not picks:
             print("no gap-down candidates")
