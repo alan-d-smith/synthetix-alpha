@@ -20,6 +20,8 @@ dependencies = [
     "python-dotenv>=1.0",
     "yfinance>=1.0",
     "pyyaml>=6.0",
+    "finnhub-python>=2.4",
+    "openai>=1.0.0",
 ]
 
 [project.optional-dependencies]
