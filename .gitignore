@@ -234,3 +234,4 @@ datasets/wallets/
 .clinerules
 results/**/*.json
 !results/.gitkeep
+!datasets/volatility_recent.parquet

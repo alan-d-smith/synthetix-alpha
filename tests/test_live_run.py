@@ -265,3 +265,23 @@ def test_fill_marker_colours_do_not_collide_with_series_hues():
     from synthetix_alpha.strategy import plots
     assert plots.WIN not in plots.SERIES_FILLS
     assert plots.LOSS not in plots.SERIES_FILLS
+
+
+def test_screen_falls_back_to_the_snapshot_without_dolt(monkeypatch):
+    """Deployment hosts have no 8GB Dolt clone, so the screen must work from the committed slice."""
+    from synthetix_alpha.live import screen
+
+    def no_dolt(*a, **k):
+        raise RuntimeError("no dolt on this host")
+
+    monkeypatch.setattr(screen, "_scan_dolt", no_dolt)
+    out = screen.scan(limit=5)
+    assert not out.empty, "the snapshot must carry the screen when Dolt is unavailable"
+    assert {"iv_rv", "iv_rank"} <= set(out.columns)
+    assert (out["iv_rv"] >= 1.25).all()
+
+
+def test_snapshot_is_committed_and_small():
+    from synthetix_alpha.live import screen
+    assert screen.SNAPSHOT.exists(), "the fallback snapshot must ship with the repo"
+    assert screen.SNAPSHOT.stat().st_size < 2_000_000, "keep the committed slice small"

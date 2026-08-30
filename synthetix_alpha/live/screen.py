@@ -27,14 +27,10 @@ def scan(iv_rv_min: float = 1.25, iv_rv_max: float = 2.0, limit: int = 40, asof:
     allow = {s.upper() for s in (u.get("ticker_allowlist") or [])}
     deny = {s.upper() for s in (u.get("ticker_denylist") or [])}
     date = f"'{asof.isoformat()}'" if asof else "(SELECT MAX(date) FROM volatility_history)"
-    df = dolt.query(f"""
-        SELECT act_symbol AS symbol, date, iv_current AS iv, hv_current AS hv,
-               iv_current/hv_current AS iv_rv,
-               (iv_current-iv_year_low)/NULLIF(iv_year_high-iv_year_low,0) AS iv_rank
-        FROM volatility_history
-        WHERE date = {date} AND hv_current > 0.05
-          AND iv_current/hv_current BETWEEN {iv_rv_min} AND {iv_rv_max}
-        ORDER BY iv_current/hv_current DESC LIMIT {max(limit * 4, 600)}""")
+    try:
+        df = _scan_dolt(date, iv_rv_min, iv_rv_max, limit)
+    except Exception:
+        df = _scan_snapshot(iv_rv_min, iv_rv_max, limit, asof)   # deployment hosts have no 8GB Dolt clone
     if df.empty:
         return df
     df["symbol"] = df["symbol"].str.upper()
@@ -42,6 +38,42 @@ def scan(iv_rv_min: float = 1.25, iv_rv_max: float = 2.0, limit: int = 40, asof:
         df = df[df["symbol"].isin(allow)]
     df = df[~df["symbol"].isin(deny)]
     return df.set_index("symbol").sort_values("iv_rank", ascending=False).head(limit)
+
+
+SNAPSHOT = config.ROOT / "datasets" / "volatility_recent.parquet"
+
+
+def _scan_snapshot(iv_rv_min: float, iv_rv_max: float, limit: int,
+                   asof: Optional[dt.date] = None) -> pd.DataFrame:
+    """Fallback for hosts without the Dolt clone: a committed slice of the same table.
+
+    The snapshot is static, so the universe it produces ages by a day per session. Refresh it with
+    `python -m synthetix_alpha.live.screen --refresh-snapshot` wherever Dolt is available.
+    """
+    if not SNAPSHOT.exists():
+        raise FileNotFoundError(f"no Dolt clone and no snapshot at {SNAPSHOT}")
+    v = pd.read_parquet(SNAPSHOT)
+    v["date"] = pd.to_datetime(v["date"]).dt.date
+    v = v[v["date"] == (asof or v["date"].max())]
+    v = v[(v["hv_current"] > 0.05) & v["iv_current"].notna()]
+    v["iv_rv"] = v["iv_current"] / v["hv_current"]
+    v = v[v["iv_rv"].between(iv_rv_min, iv_rv_max)]
+    v["iv_rank"] = ((v["iv_current"] - v["iv_year_low"]) /
+                    (v["iv_year_high"] - v["iv_year_low"]).replace(0, float("nan")))
+    return (v.rename(columns={"act_symbol": "symbol", "iv_current": "iv", "hv_current": "hv"})
+             [["symbol", "date", "iv", "hv", "iv_rv", "iv_rank"]]
+             .sort_values("iv_rv", ascending=False).head(max(limit * 4, 600)).reset_index(drop=True))
+
+
+def _scan_dolt(date: str, iv_rv_min: float, iv_rv_max: float, limit: int) -> pd.DataFrame:
+    return dolt.query(f"""
+        SELECT act_symbol AS symbol, date, iv_current AS iv, hv_current AS hv,
+               iv_current/hv_current AS iv_rv,
+               (iv_current-iv_year_low)/NULLIF(iv_year_high-iv_year_low,0) AS iv_rank
+        FROM volatility_history
+        WHERE date = {date} AND hv_current > 0.05
+          AND iv_current/hv_current BETWEEN {iv_rv_min} AND {iv_rv_max}
+        ORDER BY iv_current/hv_current DESC LIMIT {max(limit * 4, 600)}""")
 
 
 def liquidity(symbols: list[str], u: Optional[dict] = None, days: int = 20, client=None) -> pd.DataFrame:
