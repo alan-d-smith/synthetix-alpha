@@ -794,3 +794,23 @@ year-to-year variation rather than clear decay: 2024 returned 8.6% and 2026 8.4%
 the average. It does mean the honest expectation for any given week is closer to the 0.44 regime than the 1.27
 headline, and the deployed size is set with that in mind rather than the five-year figure.
 
+### Crypto, systematically: nothing that beats noise except beta
+
+With copy-trading blocked on data, the tradeable Alpaca crypto universe was tested directly on three years of daily
+bars across 21 pairs.
+
+| strategy | ann. return | Sharpe | t |
+|---|---|---|---|
+| cross-sectional momentum, 14d (best of 5 lookbacks) | 11.40% | 0.54 | 0.93 |
+| cross-sectional reversal, 3d | 3.88% | 0.19 | 0.33 |
+| equal-weight buy and hold | 27.06% | 0.39 | 0.68 |
+| BTC buy and hold | 47.45% | 1.01 | 1.75 |
+| **BTC, long only above its 50-day average** | 45.91% | **1.37** | 2.37 |
+
+No cross-sectional alpha: the best momentum lookback reaches t = 0.93 and reversal is negative. The trend filter on
+BTC is the one line with signal, holding return roughly constant while halving both exposure (55%) and drawdown
+(−26% against −53%). Two caveats keep it out of the deployed set for now. The moving-average length is swept and
+**peaks rather than plateaus** — 20 days gives Sharpe 1.02, 50 gives 1.37, 100 gives 0.82 — which is the shape of a
+fitted parameter. And three years of BTC is largely one bull market, so "hold the asset but sit out the worst
+drawdowns" is a risk-reduction result on a beta position, not evidence of edge.
+
