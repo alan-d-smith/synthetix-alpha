@@ -98,3 +98,41 @@ def test_rank_today_needs_history_for_volatility(monkeypatch):
     short = pd.DataFrame({"A": [100.0, 98.0]}, index=idx)
     monkeypatch.setattr(intraday, "panels", lambda *a, **k: (short, short))
     assert intraday.rank_today(object()).empty
+
+
+def _crypto_panel(drop_pct):
+    import numpy as np
+    import pandas as pd
+    idx = pd.date_range("2026-08-01", periods=24 * 9, freq="h", tz="UTC")
+    rng = np.random.default_rng(0)
+    calm = 100 * np.exp(np.cumsum(rng.normal(0, 0.001, len(idx))))
+    wild = 100 * np.exp(np.cumsum(rng.normal(0, 0.02, len(idx))))
+    px = pd.DataFrame({"CALM/USD": calm, "WILD/USD": wild}, index=idx)
+    px.iloc[-1, px.columns.get_loc("CALM/USD")] = px.iloc[-25]["CALM/USD"] * (1 + drop_pct)
+    return px
+
+
+def test_crypto_signal_scales_by_each_pairs_volatility():
+    from synthetix_alpha.live import crypto
+    # a 6% drop is enormous for the calm pair and unremarkable for the volatile one
+    z = crypto.zscore(_crypto_panel(-0.06))
+    assert z["CALM/USD"] < z["WILD/USD"]
+    assert crypto.signals(_crypto_panel(-0.06), threshold=3.5).index.tolist() == ["CALM/USD"]
+
+
+def test_crypto_signal_silent_without_dislocation():
+    from synthetix_alpha.live import crypto
+    assert crypto.signals(_crypto_panel(-0.0005), threshold=3.5).empty
+
+
+def test_crypto_plan_respects_budget_and_concurrency():
+    from synthetix_alpha.live import crypto
+    orders = crypto.plan(100_000.0, budget_pct=0.15, px=_crypto_panel(-0.06))
+    assert len(orders) <= crypto.MAX_CONCURRENT
+    assert sum(o["notional"] for o in orders) <= 100_000.0 * 0.15 + 1
+    assert all(o["exit_after_hours"] == crypto.HOLD for o in orders)
+
+
+def test_crypto_plan_empty_when_quiet():
+    from synthetix_alpha.live import crypto
+    assert crypto.plan(100_000.0, px=_crypto_panel(-0.0005)) == []
