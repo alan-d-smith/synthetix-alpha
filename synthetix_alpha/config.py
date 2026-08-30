@@ -13,6 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 DOLT_BIN = os.environ.get("DOLT_BIN") or shutil.which("dolt") or "C:/Program Files/Dolt/bin/dolt.exe"
 DOLT_OPTIONS_DB = Path(os.environ.get("DOLT_OPTIONS_DB", ROOT / "datasets" / "options"))  # dolt clone post-no-preference/options
 DOLT_CACHE = ROOT / "datasets" / "cache" / "dolt"
+# alpacahq/cli: the hackathon requires the CLI or MCP server, not the SDK, in the order path
+ALPACA_BIN = os.environ.get("ALPACA_BIN") or shutil.which("alpaca") or str(ROOT / "tools" / "alpaca.exe")
 
 
 def credentials() -> tuple[str, str]:

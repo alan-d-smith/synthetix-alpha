@@ -66,6 +66,19 @@ Papers already seen are recorded in [docs/papers.jsonl](docs/papers.jsonl), so r
 brief tells the agent that a mean-Sharpe gain under 0.54 is inside this sample's noise, which is the floor measured in
 [docs/research.md](docs/research.md).
 
+## Alpaca CLI
+
+Orders, account and position reads go through Alpaca's CLI (`alpacahq/cli`), not the SDK. `synthetix_alpha/live/cli.py`
+is the transport; the SDK is used only for historical market data.
+
+```bash
+go install github.com/alpacahq/cli/cmd/alpaca@latest   # or: brew install alpacahq/tap/cli
+# or drop the release binary at tools/alpaca.exe; override with ALPACA_BIN
+alpaca account get                                     # ALPACA_API_KEY / ALPACA_SECRET_KEY from .env
+```
+
+Paper is the CLI default and `live/execution.py` refuses to run if `ALPACA_LIVE_TRADE` is set.
+
 ## Live execution and risk gates
 
 `synthetix_alpha/live/` — paper-only order submission and the deterministic gates that sit in front of it.

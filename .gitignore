@@ -223,3 +223,6 @@ datasets/*
 !datasets/VIXCLS.parquet
 !datasets/VXNCLS.parquet
 datasets/papers/
+
+# Alpaca CLI binary (installed, not vendored)
+tools/
