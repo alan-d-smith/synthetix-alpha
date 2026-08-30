@@ -972,3 +972,39 @@ weeks and occasionally contributes a lot. It is deployed as an opportunistic sle
 `synthetix_alpha/live/crypto.py`, sized on the assumption that it is real but rare, and it is currently silent — the
 most dislocated pair sits at z = −0.68.
 
+## Higher frequency: breadth, not a new signal
+
+The obvious route to more trades is a faster signal, so that was tried first and failed. Buying volatility-adjusted
+dips *within* the session on a 5-minute grid, at 15-60 minute lookbacks and 30-120 minute holds, returns about
+**0.4 basis points per trade gross** — indistinguishable from zero before any cost. The gap-fade effect does not
+generalise to intraday dips; it belongs to the overnight gap specifically, which is consistent with the earlier
+finding that entries after 10:00 stopped working.
+
+Breadth turned out to be the better lever. Running the same daily signal over ~200 liquid names instead of 80:
+
+| basket | fills/day | ann. return | Sharpe | excess | t |
+|---|---|---|---|---|---|
+| 10 of 80 (previous) | 20 | 21.3% | 1.27 | +12.3% | 2.44 |
+| 10 of 198 | 20 | 46.4% | **2.61** | +39.5% | 6.47 |
+| **20 of 198** | **40** | **31.9%** | **2.11** | **+25.0%** | **5.63** |
+| 30 of 198 | 60 | 26.0% | 1.81 | +19.0% | 5.33 |
+| 50 of 198 | 100 | 20.6% | 1.51 | +13.6% | 4.85 |
+
+Choosing the twenty most dislocated names from two hundred is a far more selective cut than choosing ten from eighty,
+and the effect is not only breadth: the 116 added mid-caps score Sharpe 2.60 on their own against 1.27 for the
+megacap core. That ordering is economically sensible, since megacaps are the most heavily arbitraged names on the
+exchange and have the least overnight noise left to revert.
+
+**On survivorship**, which a dip-buying result deserves scepticism about. The universe is today's large and mid caps,
+so names that were delisted or fell out of the index are missing, and that bias flatters a strategy which buys
+declines. Two things limit the damage. The excess return is measured against an equal-weight portfolio of the *same*
+names, so the bias sits on both sides of the subtraction. And the excess is positive in every one of six years,
+including **+30.2% in 2022** — a bear market, which is where a recovery bias would be expected to show up as weakness
+rather than as the second-best year. The absolute Sharpe of 2.11 should still be read as an upper bound.
+
+Costs bind before the signal does: 24.4%/yr at 3bps per round trip, 19.3% at 5bps, 6.7% at 10bps, negative beyond 15.
+S&P large and mid caps round-trip inside 5bps on market orders, so the deployed configuration has roughly a threefold
+margin, but it is the constraint worth watching if the universe is widened further into smaller names.
+
+Deployed at n=20: **40 fills a day**, 20 market-order buys at the open and 20 market-on-close exits.
+

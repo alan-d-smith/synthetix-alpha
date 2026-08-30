@@ -16,12 +16,22 @@ import pandas as pd
 from synthetix_alpha.live import cli
 
 # The universe the effect was measured on; changing it invalidates the backtested numbers.
-UNIVERSE = ["SPY", "QQQ", "IWM", "DIA", "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA", "AMD", "AVGO",
-            "JPM", "V", "MA", "UNH", "XOM", "CVX", "JNJ", "PG", "HD", "COST", "WMT", "BAC", "NFLX", "CRM", "ORCL",
-            "ADBE", "INTC", "MU", "QCOM", "TXN", "CSCO", "PFE", "MRK", "ABBV", "T", "VZ", "DIS", "NKE", "BA",
-            "CAT", "GE", "MCD", "LOW", "SBUX", "GS", "MS", "BLK", "C", "WFC", "AXP", "IBM", "GILD", "AMGN",
-            "LMT", "RTX", "HON", "UPS", "DE", "MMM", "SO", "DUK", "NEE", "PM", "MO", "CL", "KO", "PEP", "TGT",
-            "SCHW", "SPGI", "NOW", "INTU", "AMAT", "LRCX", "KLAC", "ADI", "PANW"]
+# Breadth is the point: selecting the most dislocated names from ~200 is far more selective than from 80,
+# and the mid-caps carry more overnight noise to revert than the heavily arbitraged megacaps.
+UNIVERSE = ["AAPL", "ABBV", "ABT", "ACN", "ADBE", "ADI", "ADP", "AIG", "ALL", "AMAT", "AMD", "AMGN", "AMZN", "AON",
+            "APD", "APH", "AVGO", "AXP", "AZO", "BA", "BAC", "BDX", "BK", "BKNG", "BLK", "BMY", "BSX", "C", "CAT",
+            "CB", "CCI", "CDNS", "CHTR", "CI", "CL", "CMCSA", "CME", "CMG", "COF", "COP", "COST", "CRM", "CRWD",
+            "CSCO", "CSX", "CTAS", "CVS", "CVX", "D", "DE", "DHR", "DIA", "DIS", "DLR", "DOW", "DUK", "EA", "ECL",
+            "EL", "EMR", "EOG", "EQIX", "ETN", "EW", "EXC", "F", "FDX", "FIS", "FTNT", "GD", "GE", "GILD", "GIS",
+            "GM", "GOOGL", "GS", "HCA", "HD", "HON", "HUM", "IBM", "ICE", "IDXX", "ILMN", "INTC", "INTU", "ISRG",
+            "ITW", "IWM", "JCI", "JNJ", "JPM", "KDP", "KHC", "KLAC", "KMB", "KMI", "KO", "LHX", "LIN", "LLY",
+            "LMT", "LOW", "LRCX", "MA", "MAR", "MCD", "MCK", "MCO", "MDLZ", "MDT", "MET", "META", "MMC", "MMM",
+            "MNST", "MO", "MPC", "MRK", "MRNA", "MS", "MSFT", "MSI", "MU", "NEE", "NEM", "NFLX", "NKE", "NOC",
+            "NOW", "NSC", "NUE", "NVDA", "NXPI", "ODFL", "OKE", "ORCL", "ORLY", "OXY", "PANW", "PAYX", "PCAR",
+            "PEP", "PFE", "PG", "PGR", "PH", "PLD", "PM", "PNC", "PSA", "PSX", "PYPL", "QCOM", "QQQ", "REGN",
+            "ROP", "ROST", "RTX", "SBUX", "SCHW", "SHW", "SLB", "SNPS", "SO", "SPGI", "SPY", "SRE", "STZ", "SYK",
+            "T", "TFC", "TGT", "TJX", "TMO", "TMUS", "TRV", "TSLA", "TT", "TXN", "UNH", "UNP", "UPS", "USB", "V",
+            "VLO", "VRTX", "VZ", "WBA", "WELL", "WFC", "WM", "WMB", "WMT", "XEL", "XOM", "YUM", "ZTS"]
 
 
 def panels(client, days: int = 1825, symbols: Optional[list[str]] = None) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -38,7 +48,7 @@ def zgap(op: pd.DataFrame, cl: pd.DataFrame, window: int = 20) -> pd.DataFrame:
     return (op / cl.shift(1) - 1) / cl.pct_change().rolling(window).std()
 
 
-def backtest(client, n: int = 10, days: int = 1825, hedge: bool = False) -> dict:
+def backtest(client, n: int = 20, days: int = 1825, hedge: bool = False) -> dict:
     """Daily open-to-close returns of the gap-fade basket. hedge subtracts SPY to strip market beta."""
     op, cl = panels(client, days)
     day = cl / op - 1
@@ -53,7 +63,7 @@ def backtest(client, n: int = 10, days: int = 1825, hedge: bool = False) -> dict
             "excess_vs_benchmark": float((r - bench).mean() * 252), "returns": r}
 
 
-def rank_today(client, n: int = 10, days: int = 60) -> pd.DataFrame:
+def rank_today(client, n: int = 20, days: int = 60) -> pd.DataFrame:
     """Today's gap-downs ranked by volatility-adjusted gap. Call once the opening prints are in.
 
     Needs enough history for the 20-day volatility, so it pulls more than the two days the gap itself uses.
@@ -67,7 +77,7 @@ def rank_today(client, n: int = 10, days: int = 60) -> pd.DataFrame:
     return pd.DataFrame({"open": op.loc[today].reindex(z.index), "gap": gap, "z": z}).head(n)
 
 
-def plan(nav: float, client, n: int = 10, budget_pct: float = 0.40) -> list[dict]:
+def plan(nav: float, client, n: int = 20, budget_pct: float = 0.40) -> list[dict]:
     """Equal-weight buys across today's gap-downs, capped at budget_pct of NAV."""
     picks = rank_today(client, n)
     if picks.empty:

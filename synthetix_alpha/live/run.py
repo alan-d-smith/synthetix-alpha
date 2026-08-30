@@ -99,7 +99,7 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=5)
     ap.add_argument("--spec", default=SPEC)
     ap.add_argument("--execute", action="store_true", help="submit for real (default is a dry run)")
-    ap.add_argument("--intraday-top", type=int, default=10, help="gap-fade names, flat by the close (0 disables)")
+    ap.add_argument("--intraday-top", type=int, default=20, help="gap-fade names, flat by the close (0 disables)")
     ap.add_argument("--intraday-budget", type=float, default=0.40, help="fraction of NAV for the intraday sleeve")
     ap.add_argument("--crypto-budget", type=float, default=0.15,
                     help="fraction of NAV for the crypto dislocation sleeve (0 disables)")
