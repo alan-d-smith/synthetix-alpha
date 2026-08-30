@@ -27,10 +27,20 @@ def scan(iv_rv_min: float = 1.25, iv_rv_max: float = 2.0, limit: int = 40, asof:
     allow = {s.upper() for s in (u.get("ticker_allowlist") or [])}
     deny = {s.upper() for s in (u.get("ticker_denylist") or [])}
     date = f"'{asof.isoformat()}'" if asof else "(SELECT MAX(date) FROM volatility_history)"
-    try:
-        df = _scan_dolt(date, iv_rv_min, iv_rv_max, limit)
-    except Exception:
-        df = _scan_snapshot(iv_rv_min, iv_rv_max, limit, asof)   # deployment hosts have no 8GB Dolt clone
+    # Local clone first, then DoltHub over HTTP, then the committed snapshot. Deployment hosts have no
+    # 8GB clone, and the snapshot ages a day per session, so the API keeps them current without it.
+    df = None
+    for source in (lambda: _scan_dolt(date, iv_rv_min, iv_rv_max, limit),
+                   lambda: _scan_remote(date, iv_rv_min, iv_rv_max, limit),
+                   lambda: _scan_snapshot(iv_rv_min, iv_rv_max, limit, asof)):
+        try:
+            df = source()
+            if not df.empty:
+                break
+        except Exception:
+            continue
+    if df is None:
+        return pd.DataFrame()
     if df.empty:
         return df
     df["symbol"] = df["symbol"].str.upper()
@@ -63,6 +73,18 @@ def _scan_snapshot(iv_rv_min: float, iv_rv_max: float, limit: int,
     return (v.rename(columns={"act_symbol": "symbol", "iv_current": "iv", "hv_current": "hv"})
              [["symbol", "date", "iv", "hv", "iv_rv", "iv_rank"]]
              .sort_values("iv_rv", ascending=False).head(max(limit * 4, 600)).reset_index(drop=True))
+
+
+def _scan_remote(date: str, iv_rv_min: float, iv_rv_max: float, limit: int) -> pd.DataFrame:
+    """Same query, served by DoltHub, so a host without the clone still screens on today's data."""
+    return dolt.query_remote(f"""
+        SELECT act_symbol AS symbol, date, iv_current AS iv, hv_current AS hv,
+               iv_current/hv_current AS iv_rv,
+               (iv_current-iv_year_low)/NULLIF(iv_year_high-iv_year_low,0) AS iv_rank
+        FROM volatility_history
+        WHERE date = {date} AND hv_current > 0.05
+          AND iv_current/hv_current BETWEEN {iv_rv_min} AND {iv_rv_max}
+        ORDER BY iv_current/hv_current DESC LIMIT {max(limit * 4, 600)}""")
 
 
 def _scan_dolt(date: str, iv_rv_min: float, iv_rv_max: float, limit: int) -> pd.DataFrame:

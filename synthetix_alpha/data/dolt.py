@@ -85,3 +85,26 @@ def _load(table: str, convert: Callable, symbols: Iterable[str], start: DateLike
     out = pd.concat(frames).sort_index()
     dates = out.index.get_level_values("date")
     return out[(dates >= start) & (dates <= end)]
+
+
+DOLTHUB_API = "https://www.dolthub.com/api/v1alpha1/post-no-preference/options/master"
+
+
+def query_remote(sql: str, timeout: int = 90, url: str = DOLTHUB_API) -> pd.DataFrame:
+    """Run the same SQL against DoltHub over HTTP, for hosts without the 8GB clone.
+
+    Values arrive as strings, so numeric columns are coerced. Slower than the local clone, roughly 20 seconds,
+    which is fine for a once-a-day screen but not for anything in a loop.
+    """
+    import httpx
+
+    r = httpx.get(url, params={"q": sql}, timeout=timeout)
+    r.raise_for_status()
+    body = r.json()
+    if body.get("query_execution_status") != "Success":
+        raise RuntimeError(f"dolthub: {body.get('query_execution_message', 'query failed')}")
+    df = pd.DataFrame(body.get("rows") or [])
+    for c in df.columns:
+        if c not in ("symbol", "act_symbol", "date"):
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+    return df

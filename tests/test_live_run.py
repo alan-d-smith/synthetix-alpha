@@ -275,6 +275,7 @@ def test_screen_falls_back_to_the_snapshot_without_dolt(monkeypatch):
         raise RuntimeError("no dolt on this host")
 
     monkeypatch.setattr(screen, "_scan_dolt", no_dolt)
+    monkeypatch.setattr(screen, "_scan_remote", no_dolt)
     out = screen.scan(limit=5)
     assert not out.empty, "the snapshot must carry the screen when Dolt is unavailable"
     assert {"iv_rv", "iv_rank"} <= set(out.columns)
@@ -285,3 +286,50 @@ def test_snapshot_is_committed_and_small():
     from synthetix_alpha.live import screen
     assert screen.SNAPSHOT.exists(), "the fallback snapshot must ship with the repo"
     assert screen.SNAPSHOT.stat().st_size < 2_000_000, "keep the committed slice small"
+
+
+def test_screen_prefers_the_remote_api_over_the_static_snapshot(monkeypatch):
+    """Order matters: the snapshot ages a day per session, the API does not."""
+    import pandas as pd
+
+    from synthetix_alpha.live import screen
+    calls = []
+
+    def fail(name):
+        def f(*a, **k):
+            calls.append(name)
+            raise RuntimeError(name)
+        return f
+
+    def ok(name):
+        def f(*a, **k):
+            calls.append(name)
+            return pd.DataFrame({"symbol": ["AAA"], "date": ["2026-08-28"], "iv": [0.5],
+                                 "hv": [0.25], "iv_rv": [2.0], "iv_rank": [0.9]})
+        return f
+
+    monkeypatch.setattr(screen, "_scan_dolt", fail("dolt"))
+    monkeypatch.setattr(screen, "_scan_remote", ok("remote"))
+    monkeypatch.setattr(screen, "_scan_snapshot", ok("snapshot"))
+    out = screen.scan(limit=3)
+    assert calls == ["dolt", "remote"], "the snapshot must not be reached while the API answers"
+    assert list(out.index) == ["AAA"]
+
+
+def test_remote_query_coerces_numeric_columns(monkeypatch):
+    """The DoltHub API returns every value as a string; comparisons would silently fail on those."""
+    from synthetix_alpha.data import dolt
+
+    class R:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self):
+            return {"query_execution_status": "Success",
+                    "rows": [{"symbol": "AAA", "iv_rv": "1.98", "iv_rank": "0.25"}]}
+
+    monkeypatch.setattr(dolt, "query_remote", dolt.query_remote)
+    import httpx
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: R())
+    df = dolt.query_remote("SELECT 1")
+    assert df["iv_rv"].dtype.kind == "f" and df["iv_rank"].dtype.kind == "f"
+    assert df["symbol"].iloc[0] == "AAA"
