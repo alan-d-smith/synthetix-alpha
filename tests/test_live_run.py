@@ -67,7 +67,9 @@ def test_gap_fade_ranks_by_volatility_adjusted_gap(monkeypatch):
     import numpy as np
     import pandas as pd
     from synthetix_alpha.live import intraday
-    idx = [dt.date(2026, 1, 1) + dt.timedelta(days=i) for i in range(30)]
+    from zoneinfo import ZoneInfo
+    today = dt.datetime.now(ZoneInfo("America/New_York")).date()
+    idx = [today - dt.timedelta(days=29 - i) for i in range(30)]   # newest bar is today, as live
     rng = np.random.default_rng(0)
     # A is calm, B is volatile. On the last day both gap down 2%, so in units of their own
     # volatility A's gap is the larger shock and must rank first.
@@ -108,7 +110,8 @@ def _crypto_panel(drop_pct, hours=24 * 9):
     """
     import numpy as np
     import pandas as pd
-    idx = pd.date_range("2026-08-01", periods=hours, freq="h", tz="UTC")
+    end = pd.Timestamp.now(tz="America/New_York").normalize()
+    idx = pd.date_range(end=end, periods=hours, freq="h", tz="America/New_York")
     rng = np.random.default_rng(0)
     calm = 100 * np.exp(np.cumsum(rng.normal(0, 0.001, hours)))
     wild = 100 * np.exp(np.cumsum(rng.normal(0, 0.02, hours)))
@@ -180,3 +183,14 @@ def test_no_exit_placed_when_buy_does_not_fill(monkeypatch):
     out = intraday.enter([{"symbol": "AAA", "qty": 10}], dry_run=False, wait_seconds=0)
     assert exits == [], "an unfilled buy must not get a sell order, or the account goes short"
     assert out[0]["exit"].startswith("no fill")
+
+
+def test_rank_today_refuses_a_stale_session(monkeypatch):
+    import pandas as pd
+    from synthetix_alpha.live import intraday
+    px = _crypto_panel(-0.06, hours=24 * 30)
+    daily = px.resample("D").last()
+    daily.index = [(d - pd.Timedelta(days=400)).date() for d in daily.index]   # clearly not today
+    monkeypatch.setattr(intraday, "panels", lambda *a, **k: (daily, daily))
+    assert intraday.rank_today(object()).empty, "must not trade a previous session's gaps"
+    assert not intraday.rank_today(object(), require_fresh=False).empty

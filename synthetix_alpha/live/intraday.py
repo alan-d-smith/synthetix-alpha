@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime as dt
 import time
+from zoneinfo import ZoneInfo
 from typing import Optional
 
 import numpy as np
@@ -64,14 +65,21 @@ def backtest(client, n: int = 20, days: int = 1825, hedge: bool = False) -> dict
             "excess_vs_benchmark": float((r - bench).mean() * 252), "returns": r}
 
 
-def rank_today(client, n: int = 20, days: int = 60) -> pd.DataFrame:
+def rank_today(client, n: int = 20, days: int = 60, require_fresh: bool = True) -> pd.DataFrame:
     """Today's gap-downs ranked by volatility-adjusted gap. Call once the opening prints are in.
 
     Needs enough history for the 20-day volatility, so it pulls more than the two days the gap itself uses.
+    Refuses to rank a stale session: run before the opening print and the newest bar is yesterday's, whose gap
+    has already been traded away.
     """
     op, cl = panels(client, days=days)
     if len(op) < 22:
         return pd.DataFrame()
+    if require_fresh:
+        session = op.index[-1]
+        today = dt.datetime.now(ZoneInfo("America/New_York")).date()
+        if getattr(session, "date", lambda: session)() != today:
+            return pd.DataFrame()
     z = zgap(op, cl).iloc[-1].dropna().sort_values()
     today, prev = op.index[-1], cl.index[-2]
     gap = (op.loc[today] / cl.loc[prev] - 1).reindex(z.index)
