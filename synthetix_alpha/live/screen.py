@@ -34,7 +34,7 @@ def scan(iv_rv_min: float = 1.25, iv_rv_max: float = 2.0, limit: int = 40, asof:
         FROM volatility_history
         WHERE date = {date} AND hv_current > 0.05
           AND iv_current/hv_current BETWEEN {iv_rv_min} AND {iv_rv_max}
-        ORDER BY iv_current/hv_current DESC LIMIT {max(limit * 4, 200)}""")
+        ORDER BY iv_current/hv_current DESC LIMIT {max(limit * 4, 600)}""")
     if df.empty:
         return df
     df["symbol"] = df["symbol"].str.upper()
@@ -59,14 +59,36 @@ def liquidity(symbols: list[str], u: Optional[dict] = None, days: int = 20, clie
     return out
 
 
-def candidates(iv_rv_min: float = 1.25, limit: int = 15, client=None) -> pd.DataFrame:
-    """In-regime names that also clear the liquidity floors."""
-    s = scan(iv_rv_min=iv_rv_min, limit=limit * 3)
+def days_to_earnings(symbols: list[str], asof: Optional[dt.date] = None) -> pd.Series:
+    """Days to each name's next announcement. NaN when unknown, which the caller treats as disqualifying."""
+    from synthetix_alpha.data import yf
+
+    day = [asof or dt.date.today()]
+    out = {}
+    for sym in symbols:
+        try:
+            out[sym] = float(yf.days_to_earnings(sym, day).iloc[0])
+        except Exception:
+            out[sym] = float("nan")
+    return pd.Series(out, name="days_to_earnings")
+
+
+def candidates(iv_rv_min: float = 1.25, limit: int = 15, client=None, min_days_to_earnings: float = 30.0,
+               asof: Optional[dt.date] = None) -> pd.DataFrame:
+    """In-regime names that clear the liquidity floors and are clear of earnings.
+
+    IV is often rich precisely because an announcement is near, which is the one setup the backtest says to avoid.
+    """
+    s = scan(iv_rv_min=iv_rv_min, limit=limit * 3, asof=asof)
     if s.empty:
         return s
     liq = liquidity(list(s.index), client=client)
     out = s.join(liq, how="inner")
-    return out[out["liquid"]].drop(columns="liquid").head(limit)
+    out = out[out["liquid"]].drop(columns="liquid")
+    if out.empty:
+        return out
+    out = out.join(days_to_earnings(list(out.index), asof))
+    return out[out["days_to_earnings"] >= min_days_to_earnings].head(limit)
 
 
 def main() -> None:

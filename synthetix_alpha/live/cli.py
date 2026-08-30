@@ -69,3 +69,14 @@ def submit(legs: list[dict], contracts_qty: int, limit_price: float, coid: str, 
         args += ["--symbol", legs[0]["symbol"], "--side", SIDE[legs[0]["side"]],
                  "--position-intent", INTENT[legs[0]["side"]]]
     return run(*args, *(["--dry-run"] if dry_run else []))
+
+
+def submit_equity(symbol: str, qty: int, side: str = "buy", limit_price: Optional[float] = None,
+                  coid: Optional[str] = None, *, dry_run: bool = True) -> dict:
+    """Plain equity order. Limit when a price is given, market otherwise."""
+    args = ["order", "submit", "--symbol", symbol, "--qty", str(int(qty)), "--side", side,
+            "--time-in-force", "day"]
+    args += ["--type", "limit", "--limit-price", f"{limit_price:.2f}"] if limit_price else ["--type", "market"]
+    if coid:
+        args += ["--client-order-id", coid]
+    return run(*args, *(["--dry-run"] if dry_run else []))
