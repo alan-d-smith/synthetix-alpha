@@ -51,6 +51,14 @@ def order(order_id: str) -> dict:
     return run("order", "get", "--order-id", order_id)
 
 
+def cancel(order_id: str) -> dict:
+    """Cancel an open order. Already-terminal orders reject with 422, which is not an error here."""
+    try:
+        return run("order", "cancel", "--order-id", order_id)
+    except RuntimeError:
+        return {"status": "not_cancelable"}
+
+
 def contracts(underlying: str, *, kind: str = "put", exp_gte: str = "", exp_lte: str = "",
               strike_gte: float = 0.0, strike_lte: float = 0.0, limit: int = 500) -> list[dict]:
     """Tradable contracts for an underlying, filtered server-side."""

@@ -127,22 +127,30 @@ def enter(orders: list[dict], *, dry_run: bool = True, wait_seconds: int = 60, p
         except Exception as e:
             pending.append((o, None, f"rejected: {type(e).__name__}"))
 
-    filled: dict[str, float] = {}
+    # Wait for terminal state, then cancel whatever has not filled. The exit cannot be sized until the buy
+    # can no longer grow: sizing it to a partial fill leaves the remainder to fill afterwards and carry
+    # overnight, which is the one thing this sleeve must never do.
+    TERMINAL = {"filled", "canceled", "expired", "rejected", "done_for_day"}
     deadline = time.time() + wait_seconds
-    while time.time() < deadline and len(filled) < len([p for _, p, _ in pending if p]):
-        for o, oid, _ in pending:
-            if oid is None or o["symbol"] in filled:
-                continue
+    live = [(o, oid) for o, oid, _ in pending if oid]
+    states: dict[str, dict] = {}
+    while time.time() < deadline:
+        for o, oid in live:
             try:
-                st = cli.order(oid)
+                states[oid] = cli.order(oid)
             except Exception:
                 continue
-            if str(st.get("status")) in ("filled", "partially_filled"):
-                q = float(st.get("filled_qty") or 0)
-                if q > 0 and str(st.get("status")) == "filled":
-                    filled[o["symbol"]] = q
-        if len(filled) < len([p for _, p, _ in pending if p]):
-            time.sleep(poll)
+        if all(str(states.get(oid, {}).get("status")) in TERMINAL for _, oid in live):
+            break
+        time.sleep(poll)
+    for o, oid in live:
+        if str(states.get(oid, {}).get("status")) not in TERMINAL:
+            cli.cancel(oid)
+            try:
+                states[oid] = cli.order(oid)          # re-read: the cancel fixes the filled quantity
+            except Exception:
+                pass
+    filled = {o["symbol"]: float(states.get(oid, {}).get("filled_qty") or 0) for o, oid in live}
 
     out = []
     for o, oid, status in pending:
@@ -155,3 +163,38 @@ def enter(orders: list[dict], *, dry_run: bool = True, wait_seconds: int = 60, p
                 exit_status = f"EXIT FAILED: {type(e).__name__}"
         out.append({**o, "buy": status, "filled_qty": qty, "exit": exit_status})
     return out
+
+
+def flatten(*, dry_run: bool = True) -> list[dict]:
+    """Ensure every open long is covered by a resting sell before the close.
+
+    Entry-time bookkeeping cannot be trusted on its own: a cancel can race a fill, an exit can be rejected, and a
+    position can arrive from somewhere else. This reconciles intent against the actual account and is the guarantee
+    that the sleeve is flat overnight. Run it before the market-on-close cutoff (15:50 ET).
+    """
+    positions = cli.positions()
+    resting: dict[str, float] = {}
+    for o in cli.orders("open"):
+        if str(o.get("side")) == "sell":
+            sym = str(o.get("symbol"))
+            qty = float(o.get("qty") or 0) - float(o.get("filled_qty") or 0)
+            resting[sym] = resting.get(sym, 0.0) + qty
+    out = []
+    for pos in positions:
+        sym = str(pos.get("symbol"))
+        held = float(pos.get("qty") or 0)
+        if held <= 0:                                   # shorts are not this sleeve's doing; leave them alone
+            continue
+        uncovered = held - resting.get(sym, 0.0)
+        if uncovered <= 0:
+            continue
+        status = "would submit" if dry_run else "submitted"
+        if not dry_run:
+            try:
+                status = _close_order(sym, uncovered, dry_run=False).get("status", "submitted")
+            except Exception as e:
+                status = f"FAILED: {type(e).__name__}"
+        out.append({"symbol": sym, "held": held, "resting_sell": resting.get(sym, 0.0),
+                    "uncovered": uncovered, "status": status})
+    return out
+

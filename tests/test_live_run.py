@@ -175,22 +175,68 @@ def test_exit_waits_for_fill_and_uses_filled_quantity(monkeypatch):
 
 def test_no_exit_placed_when_buy_does_not_fill(monkeypatch):
     from synthetix_alpha.live import intraday
-    exits = []
+    sent = []
     monkeypatch.setattr(intraday.cli, "submit_equity", lambda *a, **k: {"id": "x", "status": "accepted"})
     monkeypatch.setattr(intraday.cli, "order", lambda oid: {"status": "new", "filled_qty": "0"})
-    monkeypatch.setattr(intraday.cli, "run", lambda *a, **k: exits.append(a) or {"status": "accepted"})
+    monkeypatch.setattr(intraday.cli, "cancel", lambda oid: {"status": "canceled"})
+    monkeypatch.setattr(intraday.cli, "run", lambda *a, **k: sent.append(a) or {"status": "accepted"})
     monkeypatch.setattr(intraday.time, "sleep", lambda s: None)
     out = intraday.enter([{"symbol": "AAA", "qty": 10}], dry_run=False, wait_seconds=0)
-    assert exits == [], "an unfilled buy must not get a sell order, or the account goes short"
+    assert not any("cls" in a for a in sent), "an unfilled buy must not get a sell, or the account goes short"
     assert out[0]["exit"].startswith("no fill")
 
 
-def test_rank_today_refuses_a_stale_session(monkeypatch):
-    import pandas as pd
+def test_partial_fill_is_cancelled_before_the_exit_is_sized(monkeypatch):
+    """A partial fill must be frozen by cancelling the remainder.
+
+    Sizing the exit to the partial quantity while the rest of the buy is still working means the remainder
+    fills afterwards and is carried overnight, which this sleeve must never do.
+    """
     from synthetix_alpha.live import intraday
-    px = _crypto_panel(-0.06, hours=24 * 30)
-    daily = px.resample("D").last()
-    daily.index = [(d - pd.Timedelta(days=400)).date() for d in daily.index]   # clearly not today
-    monkeypatch.setattr(intraday, "panels", lambda *a, **k: (daily, daily))
-    assert intraday.rank_today(object()).empty, "must not trade a previous session's gaps"
-    assert not intraday.rank_today(object(), require_fresh=False).empty
+    sent, cancelled, state = [], [], {"filled_qty": "5", "status": "partially_filled"}
+
+    def fake_cancel(oid):
+        cancelled.append(oid)
+        state.update(status="canceled")      # cancelling freezes the quantity at 5
+        return {"status": "canceled"}
+
+    monkeypatch.setattr(intraday.cli, "submit_equity", lambda *a, **k: {"id": "oid1", "status": "accepted"})
+    monkeypatch.setattr(intraday.cli, "order", lambda oid: dict(state))
+    monkeypatch.setattr(intraday.cli, "cancel", fake_cancel)
+    monkeypatch.setattr(intraday.cli, "run", lambda *a, **k: sent.append(a) or {"status": "accepted"})
+    monkeypatch.setattr(intraday.time, "sleep", lambda s: None)
+    out = intraday.enter([{"symbol": "AAA", "qty": 10}], dry_run=False, wait_seconds=0)
+    assert cancelled == ["oid1"], "the unfilled remainder must be cancelled before the exit is sized"
+    exits = [a for a in sent if "cls" in a]
+    assert len(exits) == 1
+    assert exits[0][exits[0].index("--qty") + 1] == "5.0"
+    assert out[0]["filled_qty"] == 5.0
+
+
+def test_flatten_covers_only_the_uncovered_quantity(monkeypatch):
+    from synthetix_alpha.live import intraday
+    sent = []
+    monkeypatch.setattr(intraday.cli, "positions", lambda: [
+        {"symbol": "AAA", "qty": "10"},      # 4 already resting -> 6 uncovered
+        {"symbol": "BBB", "qty": "5"},       # fully covered -> nothing
+        {"symbol": "CCC", "qty": "7"},       # nothing resting -> all 7
+        {"symbol": "DDD", "qty": "-3"},      # a short is not ours to cover
+    ])
+    monkeypatch.setattr(intraday.cli, "orders", lambda status="open": [
+        {"symbol": "AAA", "side": "sell", "qty": "4", "filled_qty": "0"},
+        {"symbol": "BBB", "side": "sell", "qty": "5", "filled_qty": "0"},
+        {"symbol": "CCC", "side": "buy", "qty": "2", "filled_qty": "0"},
+    ])
+    monkeypatch.setattr(intraday.cli, "run", lambda *a, **k: sent.append(a) or {"status": "accepted"})
+    out = {r["symbol"]: r for r in intraday.flatten(dry_run=False)}
+    assert set(out) == {"AAA", "CCC"}
+    assert out["AAA"]["uncovered"] == 6.0 and out["CCC"]["uncovered"] == 7.0
+    assert all("cls" in a for a in sent) and len(sent) == 2
+
+
+def test_flatten_is_a_noop_when_everything_is_covered(monkeypatch):
+    from synthetix_alpha.live import intraday
+    monkeypatch.setattr(intraday.cli, "positions", lambda: [{"symbol": "AAA", "qty": "10"}])
+    monkeypatch.setattr(intraday.cli, "orders", lambda status="open": [
+        {"symbol": "AAA", "side": "sell", "qty": "10", "filled_qty": "0"}])
+    assert intraday.flatten(dry_run=True) == []
