@@ -113,3 +113,36 @@ def test_days_to_fomc(tmp_path):
     pd.DataFrame({"date": [dt.date(2022, 1, 26), dt.date(2022, 3, 16)]}).to_parquet(cache, index=False)
     d = fomc.days_to_fomc([dt.date(2022, 1, 20), dt.date(2022, 1, 26), dt.date(2022, 2, 1)], cache=cache)
     assert list(d) == [6.0, 0.0, 43.0]
+
+
+def test_bitquery_requires_token(monkeypatch):
+    import pytest
+    from synthetix_alpha.data import bitquery
+    monkeypatch.delenv("BITQUERY_TOKEN", raising=False)
+    with pytest.raises(RuntimeError, match="BITQUERY_TOKEN"):
+        bitquery.token()
+
+
+def test_bitquery_retries_on_429(monkeypatch):
+    from synthetix_alpha.data import bitquery
+
+    class R:
+        def __init__(self, code): self.status_code = code
+        def raise_for_status(self): pass
+        def json(self): return {"data": {"ok": 1}}
+
+    calls = []
+    monkeypatch.setenv("BITQUERY_TOKEN", "x")
+    monkeypatch.setattr(bitquery.time, "sleep", lambda s: None)
+    monkeypatch.setattr(bitquery.httpx, "post", lambda *a, **k: calls.append(1) or R(429 if len(calls) < 3 else 200))
+    assert bitquery.query("{}") == {"ok": 1} and len(calls) == 3
+
+
+def test_wallet_aggregates_computes_net(monkeypatch):
+    from synthetix_alpha.data import bitquery
+    monkeypatch.setattr(bitquery, "query", lambda *a, **k: {"Solana": {"DEXTradeByTokens": [
+        {"Trade": {"Account": {"Address": "W1"}}, "bought_usd": "100", "sold_usd": "250", "n_buys": "3", "n_sells": "4"},
+        {"Trade": {"Account": {"Address": "W2"}}, "bought_usd": "500", "sold_usd": "100", "n_buys": "2", "n_sells": "1"}]}})
+    df = bitquery.wallet_aggregates("mint", "2026-01-01", "2026-01-02")
+    assert list(df["wallet"]) == ["W1", "W2"]  # sorted by net extracted
+    assert df.iloc[0]["net_usd"] == 150 and df.iloc[0]["trades"] == 7
