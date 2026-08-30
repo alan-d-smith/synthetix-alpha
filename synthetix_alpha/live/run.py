@@ -14,7 +14,7 @@ import pandas as pd
 from typing import Optional
 
 from synthetix_alpha.data.alpaca import AlpacaClient
-from synthetix_alpha.live import cli, equity, execution, risk, screen
+from synthetix_alpha.live import cli, equity, execution, intraday, risk, screen
 from synthetix_alpha.strategy import engine
 from synthetix_alpha.strategy.spec import Spec
 
@@ -90,8 +90,10 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=5)
     ap.add_argument("--spec", default=SPEC)
     ap.add_argument("--execute", action="store_true", help="submit for real (default is a dry run)")
-    ap.add_argument("--equity-top", type=int, default=10, help="names in the parallel equity sleeve (0 disables)")
-    ap.add_argument("--equity-budget", type=float, default=0.20, help="fraction of NAV for the equity sleeve")
+    ap.add_argument("--intraday-top", type=int, default=10, help="gap-fade names, flat by the close (0 disables)")
+    ap.add_argument("--intraday-budget", type=float, default=0.40, help="fraction of NAV for the intraday sleeve")
+    ap.add_argument("--equity-top", type=int, default=0, help="overnight momentum names (0 disables)")
+    ap.add_argument("--equity-budget", type=float, default=0.20, help="fraction of NAV for the momentum sleeve")
     a = ap.parse_args()
     p = plan(a.limit, a.spec)
     print(json.dumps({k: p[k] for k in ("nav", "skipped", "halts")}, indent=1, default=str))
@@ -100,8 +102,17 @@ def main() -> None:
         print(f"{o['symbol']:<6} {o['contracts']:>3}x  credit ${o['credit']:>8,.0f}  risk ${o['max_loss']:>9,.0f}  {res['status']}")
     if not p["approved"]:
         print("no approved option spreads today")
+    if a.intraday_top:
+        print(f"\nintraday gap-fade ({a.intraday_budget:.0%} of NAV, flat by the close):")
+        client = AlpacaClient()
+        picks = intraday.plan(p["nav"], client, n=a.intraday_top, budget_pct=a.intraday_budget)
+        for o in intraday.enter(picks, dry_run=not a.execute):
+            print(f"{o['symbol']:<6} {o['qty']:>5} sh  ${o['notional']:>9,.0f}  gap {o['gap']:+.2%}  "
+                  f"buy {o['buy']} / exit {o['exit']}")
+        if not picks:
+            print("no gap-down candidates")
     if a.equity_top:
-        print(f"\nequity sleeve (momentum, {a.equity_budget:.0%} of NAV):")
+        print(f"\novernight momentum ({a.equity_budget:.0%} of NAV):")
         eq = equity.plan(p["nav"], AlpacaClient(), top_n=a.equity_top, budget_pct=a.equity_budget)
         for o in equity.submit_all(eq, dry_run=not a.execute):
             print(f"{o['symbol']:<6} {o['qty']:>4} sh  ${o['notional']:>9,.0f}  mom {o['momentum']:+.1%}  {o['status']}")

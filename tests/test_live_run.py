@@ -61,3 +61,23 @@ def test_cli_raises_on_error_envelope(monkeypatch):
     monkeypatch.setattr(cli, "_env", lambda: {})
     with pytest.raises(RuntimeError, match="authentication required"):
         cli.account()
+
+
+def test_gap_fade_ranks_worst_gaps_and_is_flat_by_close(monkeypatch):
+    import pandas as pd
+    from synthetix_alpha.live import intraday
+    idx = [dt.date(2026, 8, 27), dt.date(2026, 8, 28)]
+    op = pd.DataFrame({"A": [100.0, 90.0], "B": [100.0, 99.0], "C": [100.0, 101.0]}, index=idx)
+    cl = pd.DataFrame({"A": [100.0, 95.0], "B": [100.0, 99.5], "C": [100.0, 100.0]}, index=idx)
+    monkeypatch.setattr(intraday, "panels", lambda *a, **k: (op, cl))
+    picks = intraday.rank_today(object(), n=2)
+    assert list(picks.index) == ["A", "B"]  # A gapped -10%, B -1%, C +1%
+    orders = intraday.plan(100_000.0, object(), n=2, budget_pct=0.4)
+    assert [o["symbol"] for o in orders] == ["A", "B"]
+    assert sum(o["notional"] for o in orders) <= 100_000.0 * 0.4 + 1
+
+    sent = []
+    monkeypatch.setattr(intraday.cli, "submit_equity", lambda *a, **k: sent.append(a) or {"status": "accepted"})
+    monkeypatch.setattr(intraday.cli, "run", lambda *a, **k: sent.append(a) or {"status": "accepted"})
+    intraday.enter(orders[:1], dry_run=True)
+    assert any("cls" in a for a in sent), "exit must be market-on-close so the sleeve never holds overnight"

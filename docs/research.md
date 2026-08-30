@@ -635,3 +635,45 @@ Finding that comparison also exposed a bug in `backtest_combo`: sleeves with no 
 with a 0% return, which reads as "flat" rather than "absent" and silently penalised any portfolio whose sleeves have
 different histories. Weights are now renormalised each day onto the sleeves that are actually live. Before the fix the
 widened portfolio looked better on the full period; after it, worse — the fix reversed the conclusion.
+
+## An intraday equity sleeve, because the options edge is too slow for a one-week window
+
+The options book is a high-Sharpe, low-return business: the deployed spread earns ~1%/yr, which over four and a half
+trading days is roughly $20 on $100k. Shortening DTE does not rescue it — a sweep from 65 down to 7 days trades more
+often but degrades, because the theta gained is paid for in gamma:
+
+| DTE | Sharpe | trades | return/yr | max DD |
+|---|---|---|---|---|
+| 65 (deployed) | 0.92 | 102 | 0.9% | −2.0% |
+| 10 | 0.63 | 304 | 1.4% | −6.0% |
+| 7 | 0.36 | 316 | 0.8% | −10.0% |
+
+So a second sleeve was tested on 5 years of Alpaca daily bars over 50 liquid names. Two ideas, one dead:
+
+**Short-term reversal does not work here.** Long past losers / short past winners returns −0.7% to −5.4%/yr at every
+lookback from 1 to 5 days. Rejected. The first version of this test reported Sharpe −42 with a 0% win rate, which is
+not a result but a bug: shifting the *aggregated* return series only relabels the index, so the ranking was still being
+scored against the same day's return it was computed from. Shifting the selection masks instead gives the numbers above.
+
+**Overnight gap fade does work.** Buying the ten largest overnight gap-downs at the open and flattening at the close:
+
+| variant | ann. return | Sharpe | win rate |
+|---|---|---|---|
+| long 10 gap-downs, open→close | **16.2%** | **0.86** | 52% |
+| long gap-downs, short SPY (beta stripped) | 10.5% | **0.91** | 51% |
+| equal-weight benchmark (all 50 names, open→close) | 8.7% | 0.59 | 52% |
+
+Profitable in 5 of 6 years. Two things keep this honest. The excess over simply being long open-to-close is +7.4%/yr
+with **t = 1.53** — suggestive, not significant, so most of the raw Sharpe is beta rather than alpha. And it is
+cost-sensitive: +11.2%/yr net of 2bps round-trip, +3.6% at 5bps, and **−9.0% at 10bps**.
+
+The effect is also not what intuition suggests. Requiring *larger* gaps destroys it monotonically (−0.5%: 0.53 Sharpe,
+−1%: 0.16, −2%: −0.48, −3%: −0.72). Big gaps carry news and continue; this is a mild cross-sectional tilt, not a panic
+fade. Basket size is a plateau rather than a peak (10–20 names all score 0.77–0.86), so no single parameter is load-bearing.
+
+Execution matches the backtest closely: entry is a market order once the opening prints are in, and the exit is a
+market-on-close order submitted at the same time, so it fills at the official close the backtest measures and the
+sleeve cannot hold overnight. `synthetix_alpha/live/intraday.py`, run from `live/run.py`.
+
+Also fixed here: `backtest_combo` filled a missing sleeve's days with a 0% return — see the correction above.
+
