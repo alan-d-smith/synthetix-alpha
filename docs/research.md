@@ -814,7 +814,15 @@ BTC is the one line with signal, holding return roughly constant while halving b
 fitted parameter. And three years of BTC is largely one bull market, so "hold the asset but sit out the worst
 drawdowns" is a risk-reduction result on a beta position, not evidence of edge.
 
-### Do high-win-rate wallets keep winning? Yes, about 87% of the time — and it still does not pay
+### Do high-win-rate wallets keep winning? One Sunday says 87%, which is not enough to know
+
+**Read this section as a single observation, not a result.** Every number below comes from one pair of disjoint
+six-hour windows measured on Sunday 2026-08-30: wallets ranked over `now-12h to now-6h`, scored over `now-6h to now`.
+Bitquery's realtime dataset retains only a few hours, so exactly one such pair exists at any moment, and the free
+tier's quota was exhausted before a second could be gathered on a later day. Elsewhere in this document an effect is
+rejected at t = 0.81 on 275 sessions; nothing here meets that standard, in either direction. The cost arithmetic is
+solid, since fee schedules and live spreads are facts rather than estimates, but every signal figure rests on twelve
+hours of weekend flow.
 
 The premise is testable without historical archives. Bitquery's realtime dataset serves windows ending up to roughly
 six hours ago, which is enough for two **disjoint** six-hour windows: rank wallets on A, score them on B.
@@ -1033,3 +1041,29 @@ plus 0.30% of fees, and the persistent wallet edges measured 0.22-0.44%. A perfe
 amount of further collection can change the conclusion. The snapshots already gathered stay in `datasets/wallets/`
 and the decay curve they produced is recorded above.
 
+### What the single-sample problem actually leaves undecided
+
+Selecting harder does raise the measured edge, and an earlier version of this document was wrong to dismiss copying on
+the *median* edge across persistent wallets. Bucketed by past edge on that one Sunday:
+
+| selection | n | median past edge | forward edge |
+|---|---|---|---|
+| all two-sided wallets | 219 | 0.27% | 0.37% |
+| top 25% | 54 | 1.20% | 0.66% |
+| top 10% | 21 | 2.44% | **1.18%** |
+
+Regression to the mean is severe — the top decile keeps 48% of its edge — but 1.18% against SOL's 0.38% round-trip
+cost is a threefold margin, not an insufficient one.
+
+What closes the gap is that only the *directional* component is copyable; the rest is maker spread capture earned at
+prices we cannot reach. Measured against a random-timestamp baseline, TRUMP shows a real directional excess of +0.21%
+at five minutes and +0.32% at fifteen, against a 0.89% cost. SOL shows **none**: its raw forward returns look strongly
+predictive (t up to 25) purely because SOL drifted +1.78% through the window, and against random timestamps the excess
+is −0.08% to −0.18%. Drift, not skill. That correction matters more than the headline, because the uncontrolled
+version is exactly the kind of number that would have justified deploying capital.
+
+So the two tokens fail for opposite reasons: the one with tight spreads has no signal, and the one with signal has
+wide spreads. That anti-correlation is plausible rather than accidental, since the same inefficiency shows up as both.
+But plausible is not demonstrated. Establishing it needs repeated window pairs across many days, which requires
+Bitquery archive access, a Flipside or Dune export, or weeks of forward collection. Until then this is an open
+question, not a closed one.
