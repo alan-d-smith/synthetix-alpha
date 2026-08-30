@@ -1067,3 +1067,39 @@ wide spreads. That anti-correlation is plausible rather than accidental, since t
 But plausible is not demonstrated. Establishing it needs repeated window pairs across many days, which requires
 Bitquery archive access, a Flipside or Dune export, or weeks of forward collection. Until then this is an open
 question, not a closed one.
+
+## Stock splits were silently freezing marks
+
+Kaggle chains are not split adjusted, and the engine did nothing about it. `yf.spans_split` existed for exactly
+this purpose and was never called from anywhere in the engine.
+
+The failure was quiet rather than loud. `_mark` looks a contract up in the day's chain; after a split the old
+strikes are gone, and with no explicit fallback the leg simply keeps its last mark. An AAPL spread opened
+2020-08-28 at strikes 435/395 held through the 4:1 split on 2020-08-31, and from that day was valued at a
+pre-split price for the remaining month of its life, closing for a reported **-$17**.
+
+Positions are now adjusted the way OCC adjusts them: contracts multiply by the ratio, while strike, mark and the
+per-share entry value divide by it, and the OCC symbol is rebuilt. The adjusted contracts do exist in the data
+(`AAPL201016P00108750` quotes at 3.18 on the exit date), so marking resumes normally. The same trade now runs as
+four contracts at 108.75/98.75 and closes at **-$357**, which is what a 12% split-adjusted fall in the underlying
+actually cost.
+
+Six trades out of 260 spanned a split. Isolating the fix with identical specs on both sides:
+
+| strategy | Sharpe, splits ignored | Sharpe, adjusted | delta |
+|---|---|---|---|
+| put_vertical_singlename | 0.817 | 0.807 | −0.010 |
+| put_vertical_singlename_wide | 0.756 | **0.853** | **+0.098** |
+| the other nine specs | unchanged | unchanged | 0.000 |
+
+The correction runs in both directions, which is worth noting: stale marks were understating a loss on AAPL and
+overstating losses on NVDA. Only single names are affected at all, since SPY and QQQ have never split.
+
+One attribution error is worth recording. The deployed single-name sleeve moved from 0.900 to 0.807 across this
+work, and the first reading of that blamed the split fix. It did not: 0.900 predated the switch to daily entry with
+twelve slots, and re-benchmarking with identical specs on both sides shows the split fix accounts for −0.010 of it.
+The remaining −0.083 is the deployment change. Comparing against a number measured under different settings is how
+a small correction gets mistaken for a large one.
+
+**Deployed portfolio, re-benchmarked:** Sharpe 0.870, max drawdown −5.03%, total return +31.95% over 453 trades.
+

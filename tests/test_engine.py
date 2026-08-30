@@ -118,3 +118,41 @@ def test_backtest_combo_blends_returns_not_capital(monkeypatch):
     out = runmod.backtest_combo([a, b], weights=[0.5, 0.5], equity0=100_000.0)
     assert seen == [100_000.0, 100_000.0]  # each sleeve keeps full capital, so contract rounding is unchanged
     assert out["summary"]["total_trades"] == 20 and out["combined"]["total_return"] > 0
+
+
+def test_split_adjustment_preserves_position_value():
+    """A 4:1 split must leave the position worth the same: four contracts at a quarter the strike."""
+    import datetime as dt
+
+    from synthetix_alpha.strategy.engine import OpenLeg, Position, _apply_split
+    legs = [OpenLeg("AAPL201016P00435000", "put", -1, 1, 435.0, dt.date(2020, 10, 16), 11.095),
+            OpenLeg("AAPL201016P00395000", "put", 1, 1, 395.0, dt.date(2020, 10, 16), 4.820)]
+    pos = Position(legs=legs, contracts=1, entry_date=dt.date(2020, 8, 28),
+                   entry_value=-6.275, expiration=dt.date(2020, 10, 16))
+    before = pos.value() * pos.contracts
+    assert _apply_split(pos, 4.0)
+    assert pos.contracts == 4
+    assert pos.legs[0].strike == 435.0 / 4 and pos.legs[1].strike == 395.0 / 4
+    assert pos.legs[0].symbol == "AAPL201016P00108750"
+    assert pos.legs[1].symbol == "AAPL201016P00098750"
+    assert abs(pos.value() * pos.contracts - before) < 1e-9, "a split must not create or destroy value"
+    assert abs(pos.entry_value - (-6.275 / 4)) < 1e-9, "per-share entry must scale with the strike"
+
+
+def test_split_adjustment_refuses_fractional_ratios():
+    """A 3:2 split cannot keep contract counts whole, so it must be declined rather than silently rounded."""
+    import datetime as dt
+
+    from synthetix_alpha.strategy.engine import OpenLeg, Position, _apply_split
+    pos = Position(legs=[OpenLeg("X201016P00100000", "put", -1, 1, 100.0, dt.date(2020, 10, 16), 1.0)],
+                   contracts=1, entry_date=dt.date(2020, 8, 28), entry_value=-1.0,
+                   expiration=dt.date(2020, 10, 16))
+    assert not _apply_split(pos, 1.5)
+    assert pos.contracts == 1 and pos.legs[0].strike == 100.0
+
+
+def test_engine_data_exposes_split_dates():
+    from synthetix_alpha.strategy.data import EngineData
+    assert EngineData._load_splits("SPY") == {}, "SPY has never split"
+    aapl = EngineData._load_splits("AAPL")
+    assert aapl.get(__import__("datetime").date(2020, 8, 31)) == 4.0

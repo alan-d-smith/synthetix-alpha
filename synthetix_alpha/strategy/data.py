@@ -174,6 +174,17 @@ class EngineData:
         self.underlying, self.features = underlying, feats
         self._by_date = {d: g.set_index("symbol") for d, g in chains.groupby(level=0, sort=True)}
         self.dates = sorted(self._by_date)
+        self.splits = self._load_splits(underlying)
+
+    @staticmethod
+    def _load_splits(underlying: str) -> dict:
+        """Effective date -> ratio. Chains are not split adjusted, so open positions must be adjusted
+        on these dates or their contracts vanish and the mark silently freezes."""
+        from synthetix_alpha.data import yf
+        try:
+            return {d: float(r) for d, r in yf.splits(underlying).items() if float(r) > 0}
+        except Exception:
+            return {}
 
     @classmethod
     def load(cls, underlying: str, dte_max: int = 120, start: Optional[dt.date] = None, end: Optional[dt.date] = None,
