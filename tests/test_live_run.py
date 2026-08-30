@@ -240,3 +240,28 @@ def test_flatten_is_a_noop_when_everything_is_covered(monkeypatch):
     monkeypatch.setattr(intraday.cli, "orders", lambda status="open": [
         {"symbol": "AAA", "side": "sell", "qty": "10", "filled_qty": "0"}])
     assert intraday.flatten(dry_run=True) == []
+
+
+def test_fills_panel_refuses_to_cycle_hues():
+    """More underlyings than distinct hues must raise, not silently draw two series the same colour."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import pandas as pd
+    import pytest
+
+    from synthetix_alpha.strategy import plots
+    idx = pd.date_range("2026-01-01", periods=5)
+    series = {f"S{i}": pd.Series(range(5), index=idx, dtype=float)
+              for i in range(len(plots.SERIES_FILLS) + 1)}
+    fig, ax = plt.subplots()
+    with pytest.raises(ValueError, match="cycling"):
+        plots.fills_panel(ax, series, {}, normalise=True)
+    plt.close(fig)
+
+
+def test_fill_marker_colours_do_not_collide_with_series_hues():
+    """Outcome markers sit on top of the price lines, so their hues must not be in the series palette."""
+    from synthetix_alpha.strategy import plots
+    assert plots.WIN not in plots.SERIES_FILLS
+    assert plots.LOSS not in plots.SERIES_FILLS
