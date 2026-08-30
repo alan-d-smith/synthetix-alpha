@@ -113,6 +113,14 @@ def main() -> None:
                   f"buy {o['buy']} / exit {o['exit']}")
         if not picks:
             print("no gap-down candidates")
+    if a.crypto_budget:
+        print(f"\ncrypto dislocations (z < -{crypto.THRESHOLD}, {a.crypto_budget:.0%} of NAV, {crypto.HOLD}h hold):")
+        cr = crypto.plan(p["nav"], budget_pct=a.crypto_budget)
+        for o in crypto.enter(cr, dry_run=not a.execute):
+            print(f"{o['symbol']:<10} {o['qty']:>13,.6f}  ${o['notional']:>8,.0f}  z {o['z']:+.2f}  "
+                  f"24h {o['move_24h']:+.1%}  {o['status']}")
+        if not cr:
+            print("  nothing dislocated enough, sleeve silent (expected ~16 signals/year)")
     if a.equity_top:
         print(f"\novernight momentum ({a.equity_budget:.0%} of NAV):")
         eq = equity.plan(p["nav"], AlpacaClient(), top_n=a.equity_top, budget_pct=a.equity_budget)
