@@ -1163,3 +1163,40 @@ that any fixed choice in this range beats trying to time it.
 
 Reproduce with `python -m synthetix_alpha.strategy.allocate weights` and `... budget`.
 
+## Nothing else is worth adding, and trade count is bought with return
+
+Gap fade is deployed at **60% of NAV**. Every remaining spec was then tested as a fourth options sleeve on top of
+the existing three, equal weighted, with the book measured over their common window:
+
+| added sleeve | book Sharpe | change | P&L | extra trades |
+|---|---|---|---|---|
+| *(none, current book)* | **1.417** | — | +$21,359 | — |
+| put_vertical_singlename_wide | 1.409 | −0.009 | +$21,395 | +148 |
+| put_diagonal_ivrv_robust | 1.398 | −0.019 | +$21,000 | +204 |
+| put_vertical_multi_singlename | 1.382 | −0.035 | +$20,531 | +112 |
+| index_condor_trend | 1.378 | −0.040 | +$20,324 | +143 |
+| put_vertical_ivrv_chainonly | 1.378 | −0.040 | +$20,715 | +104 |
+| put_vertical_ivrv_tail | 1.331 | −0.087 | +$19,693 | +126 |
+
+**Every one lowers Sharpe.** The correlation matrix explains it: the put-selling specs run 0.66 to 0.98 against each
+other, and `put_vertical_ivrv` against `put_vertical_ivrv_chainonly` is **0.98** — the same strategy with a different
+gate. Adding them dilutes an equal-weighted book without diversifying it. The single genuine diversifier is already
+in: `call_vertical_downtrend` correlates −0.07 to −0.28 with everything else, which is why a 0.42 Sharpe sleeve earns
+a slot the 1.12 Sharpe diagonal does not.
+
+Trade count is a different question, and it has a price. Widening the gap fade basket at a fixed 60% budget, over the
+full 1,234 sessions:
+
+| basket | fills/week | Sharpe | CAGR | P&L | max DD | per position |
+|---|---|---|---|---|---|---|
+| 5 | 45 | 2.54 | 36.9% | +$364,581 | −10.0% | 12% of NAV |
+| 10 | 90 | 2.18 | 25.4% | +$203,227 | −9.0% | 6% |
+| 20 | 180 | 1.60 | 15.2% | +$99,835 | −7.4% | 3% |
+| 30 | 270 | 1.28 | 11.2% | +$68,408 | −7.9% | 2% |
+| 50 | 450 | 0.93 | 7.6% | +$42,781 | −7.6% | 1.2% |
+
+Each doubling of trade count roughly halves the return, because the signal is a ranking: the tenth most dislocated
+name carries less of it than the first, and the fiftieth carries almost none. More trades is not more edge, it is the
+same edge spread thinner. The two goals are genuinely opposed, and the deployed basket of 20 sits closer to the
+trade-count end than the evidence supports.
+
