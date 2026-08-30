@@ -856,3 +856,23 @@ The finding does point somewhere. Alpaca's majors are far cheaper to trade — S
 could clear those costs comfortably. Measuring that needs holding periods longer than the six hours this data
 retains, which is the specific thing a Flipside or Dune export would unlock.
 
+**How long does it last?** Twenty-one snapshots collected half-hourly give a decay curve that a single pair of live
+queries cannot. Rank correlation of wallet performance against the gap between snapshots:
+
+| gap | TRUMP | WIF | BONK |
+|---|---|---|---|
+| 0.5h | 0.91 | 0.96 | 0.95 |
+| 2h | 0.80 | 0.89 | 0.83 |
+| 4h | 0.64 | 0.75 | 0.60 |
+| **6h (disjoint)** | **0.42** | **0.41** | **0.19** |
+| 8h | 0.33 | 0.35 | 0.23 |
+| 9h | 0.43 | 0.27 | 0.21 |
+
+Everything below six hours is inflated by overlap between the trailing windows. The result that matters is that once
+the windows are disjoint the correlation **plateaus rather than decaying to zero**, holding around 0.2-0.4 out to nine
+hours, which independently corroborates the +0.38 to +0.50 measured on price edge through a different data path.
+
+These snapshots recorded `net_usd` only: the collector process had imported the module before the price-edge columns
+were added, so nine hours of data sit on the confounded metric. It now records `edge` and also tracks SOL, whose
+0.15% Alpaca round-trip is the one cost structure where a copied edge could survive.
+

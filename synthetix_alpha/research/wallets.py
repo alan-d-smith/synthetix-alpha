@@ -21,7 +21,10 @@ import pandas as pd
 from synthetix_alpha.data import bitquery as bq
 
 STORE = Path("datasets/wallets")
-MINTS = {"TRUMP": "6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN",
+# SOL matters most: Alpaca round-trips it at 0.15% against 0.59-2.02% for the memecoins, so it is the only one
+# where a copied edge could clear our own execution cost.
+MINTS = {"SOL": "So11111111111111111111111111111111111111112",
+         "TRUMP": "6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN",
          "WIF": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
          "BONK": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"}
 
