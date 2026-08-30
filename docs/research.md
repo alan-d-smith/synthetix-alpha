@@ -1008,3 +1008,22 @@ margin, but it is the constraint worth watching if the universe is widened furth
 
 Deployed at n=20: **40 fills a day**, 20 market-order buys at the open and 20 market-on-close exits.
 
+### Execution hardening the higher-frequency sleeve needed
+
+Forty fills a day exposes mechanics that twenty did not, and three defects were found by inspection rather than by
+the tests, which had passed throughout.
+
+**The exit was submitted before the entry filled.** `enter` sent the market buy and then immediately sent the
+market-on-close sell. The API returns on acceptance, not on fill, so the sell could arrive before the position
+existed, and a partially filled buy would have left the account short into the close. The exit now waits for the
+fill and is sized to `filled_qty` rather than to the requested quantity.
+
+**A pre-open run would have traded the previous session.** `rank_today` ranked whatever the newest bar happened to
+be. Run before the opening print — or on a weekend — the newest bar is the prior session, whose gaps have already
+been traded away. Running it on the Sunday produced a full twenty-name book against Friday's data, the largest
+position being PayPal on a −12.6% gap that had already closed out. The function now refuses any session that is not
+today in New York.
+
+**Neither showed up in testing** because the fixtures were dated in the past and dry-run never exercised the fill
+path. The fixtures now end on the current date, so the freshness guard is exercised the way live runs it.
+
