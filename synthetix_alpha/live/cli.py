@@ -46,6 +46,11 @@ def orders(status: str = "open") -> list[dict]:
     return run("order", "list", "--status", status) or []
 
 
+def order(order_id: str) -> dict:
+    """Current state of one order, including filled_qty."""
+    return run("order", "get", "--order-id", order_id)
+
+
 def contracts(underlying: str, *, kind: str = "put", exp_gte: str = "", exp_lte: str = "",
               strike_gte: float = 0.0, strike_lte: float = 0.0, limit: int = 500) -> list[dict]:
     """Tradable contracts for an underlying, filtered server-side."""

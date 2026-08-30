@@ -8,6 +8,7 @@ are in, exited market-on-close so the exit fills at the official close the backt
 from __future__ import annotations
 
 import datetime as dt
+import time
 from typing import Optional
 
 import numpy as np
@@ -93,12 +94,56 @@ def plan(nav: float, client, n: int = 20, budget_pct: float = 0.40) -> list[dict
     return out
 
 
-def enter(orders: list[dict], *, dry_run: bool = True) -> list[dict]:
-    """Market buy at the open, plus a market-on-close sell so the sleeve cannot hold overnight."""
-    out = []
+def _close_order(symbol: str, qty: float, *, dry_run: bool) -> dict:
+    """Market-on-close sell, so the exit prints at the official close the backtest measures."""
+    return cli.run("order", "submit", "--symbol", symbol, "--qty", str(qty), "--side", "sell",
+                   "--type", "market", "--time-in-force", "cls", *(["--dry-run"] if dry_run else []))
+
+
+def enter(orders: list[dict], *, dry_run: bool = True, wait_seconds: int = 60, poll: int = 3) -> list[dict]:
+    """Buy at market, wait for the fills, then place market-on-close exits for the quantity actually filled.
+
+    The exit has to follow the fill. Submitting both at once can put the sell in before the position exists, and a
+    partially filled buy would leave the account short into the close.
+    """
+    if dry_run:
+        return [{**o, "buy": "dry_run", "exit": _close_order(o["symbol"], o["qty"], dry_run=True).get("status",
+                                                                                                      "dry_run")}
+                for o in orders]
+
+    pending = []
     for o in orders:
-        buy = cli.submit_equity(o["symbol"], o["qty"], "buy", dry_run=dry_run)
-        sell = cli.run("order", "submit", "--symbol", o["symbol"], "--qty", str(o["qty"]), "--side", "sell",
-                       "--type", "market", "--time-in-force", "cls", *(["--dry-run"] if dry_run else []))
-        out.append({**o, "buy": buy.get("status", "dry_run"), "exit": sell.get("status", "dry_run")})
+        try:
+            r = cli.submit_equity(o["symbol"], o["qty"], "buy", dry_run=False)
+            pending.append((o, r.get("id"), r.get("status")))
+        except Exception as e:
+            pending.append((o, None, f"rejected: {type(e).__name__}"))
+
+    filled: dict[str, float] = {}
+    deadline = time.time() + wait_seconds
+    while time.time() < deadline and len(filled) < len([p for _, p, _ in pending if p]):
+        for o, oid, _ in pending:
+            if oid is None or o["symbol"] in filled:
+                continue
+            try:
+                st = cli.order(oid)
+            except Exception:
+                continue
+            if str(st.get("status")) in ("filled", "partially_filled"):
+                q = float(st.get("filled_qty") or 0)
+                if q > 0 and str(st.get("status")) == "filled":
+                    filled[o["symbol"]] = q
+        if len(filled) < len([p for _, p, _ in pending if p]):
+            time.sleep(poll)
+
+    out = []
+    for o, oid, status in pending:
+        qty = filled.get(o["symbol"], 0.0)
+        exit_status = "no fill, no exit placed"
+        if qty > 0:
+            try:
+                exit_status = _close_order(o["symbol"], qty, dry_run=False).get("status", "submitted")
+            except Exception as e:
+                exit_status = f"EXIT FAILED: {type(e).__name__}"
+        out.append({**o, "buy": status, "filled_qty": qty, "exit": exit_status})
     return out

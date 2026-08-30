@@ -143,3 +143,40 @@ def test_crypto_plan_respects_budget_and_concurrency():
 def test_crypto_plan_empty_when_quiet():
     from synthetix_alpha.live import crypto
     assert crypto.plan(100_000.0, px=_crypto_panel(-0.0005)) == []
+
+
+def test_exit_waits_for_fill_and_uses_filled_quantity(monkeypatch):
+    from synthetix_alpha.live import intraday
+    calls = []
+
+    def fake_submit(symbol, qty, side, *a, **k):
+        calls.append(("buy", symbol, qty))
+        return {"id": f"id-{symbol}", "status": "accepted"}
+
+    def fake_order(oid):
+        return {"status": "filled", "filled_qty": "7"}   # asked for 10, got 7
+
+    def fake_run(*args, **k):
+        calls.append(("exit", args[args.index("--symbol") + 1], args[args.index("--qty") + 1]))
+        return {"status": "accepted"}
+
+    monkeypatch.setattr(intraday.cli, "submit_equity", fake_submit)
+    monkeypatch.setattr(intraday.cli, "order", fake_order)
+    monkeypatch.setattr(intraday.cli, "run", fake_run)
+    monkeypatch.setattr(intraday.time, "sleep", lambda s: None)
+    out = intraday.enter([{"symbol": "AAA", "qty": 10, "notional": 1000}], dry_run=False)
+    assert [c[0] for c in calls] == ["buy", "exit"], "the buy must be submitted before the exit"
+    assert calls[1][2] == "7.0", "exit quantity must be what actually filled, not what was requested"
+    assert out[0]["filled_qty"] == 7.0
+
+
+def test_no_exit_placed_when_buy_does_not_fill(monkeypatch):
+    from synthetix_alpha.live import intraday
+    exits = []
+    monkeypatch.setattr(intraday.cli, "submit_equity", lambda *a, **k: {"id": "x", "status": "accepted"})
+    monkeypatch.setattr(intraday.cli, "order", lambda oid: {"status": "new", "filled_qty": "0"})
+    monkeypatch.setattr(intraday.cli, "run", lambda *a, **k: exits.append(a) or {"status": "accepted"})
+    monkeypatch.setattr(intraday.time, "sleep", lambda s: None)
+    out = intraday.enter([{"symbol": "AAA", "qty": 10}], dry_run=False, wait_seconds=0)
+    assert exits == [], "an unfilled buy must not get a sell order, or the account goes short"
+    assert out[0]["exit"].startswith("no fill")
