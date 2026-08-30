@@ -814,3 +814,45 @@ BTC is the one line with signal, holding return roughly constant while halving b
 fitted parameter. And three years of BTC is largely one bull market, so "hold the asset but sit out the worst
 drawdowns" is a risk-reduction result on a beta position, not evidence of edge.
 
+### Do high-win-rate wallets keep winning? Yes, about 87% of the time — and it still does not pay
+
+The premise is testable without historical archives. Bitquery's realtime dataset serves windows ending up to roughly
+six hours ago, which is enough for two **disjoint** six-hour windows: rank wallets on A, score them on B.
+
+The first pass ranked by net USD extracted (`sold_usd - bought_usd`) and looked strong — winners in A came back
+positive in B 74-85% of the time against a 54-68% base rate. That result is not trustworthy on its own. Net flow is
+autocorrelated by construction: a wallet steadily distributing a position shows positive net USD in every window
+simply because it keeps selling. The largest wallet by net flow extracted $1.16M while its **average sell price sat
+0.08% below its average buy price** — mechanically distributing, not trading well.
+
+Re-running on a metric that cannot be faked that way — average sell price divided by average buy price, so a wallet
+only scores if it sold higher than it bought — the persistence survives:
+
+| token | positive edge in A, then positive in B | base rate | lift | rank corr |
+|---|---|---|---|---|
+| TRUMP | **87%** | 77% | +10pp | +0.50 |
+| WIF | **88%** | 71% | +17pp | +0.46 |
+| BONK | **87%** | 71% | +16pp | +0.38 |
+
+It cuts both ways — wallets with negative edge in A come back positive only 41-48% of the time — and it holds for
+low-frequency wallets (rank correlation +0.56, +0.41, +0.53) at least as strongly as for high-frequency ones, so it is
+not purely a market-making artifact.
+
+**So the premise holds, and the strategy still fails, on execution economics rather than on persistence.** The median
+persistent edge is 0.22% to 0.44% per round trip. That is spread capture, earned by *providing* liquidity. Copying it
+through Alpaca means *taking* liquidity:
+
+| token | Alpaca round-trip spread | wallet edge | ratio |
+|---|---|---|---|
+| TRUMP | 0.59% | 0.44% | 1.3x |
+| WIF | 0.66% | 0.27% | 2.4x |
+| BONK | 2.02% | 0.26% | 7.8x |
+
+The cost of copying exceeds the entire edge being copied, on every token, before any latency. A copier is the
+counterparty to the very spread these wallets earn.
+
+The finding does point somewhere. Alpaca's majors are far cheaper to trade — SOL round-trips at 0.15%, ETH and BTC at
+0.06-0.07% — so a wallet with genuine *directional* edge held over days, rather than scalping edge held over minutes,
+could clear those costs comfortably. Measuring that needs holding periods longer than the six hours this data
+retains, which is the specific thing a Flipside or Dune export would unlock.
+

@@ -115,6 +115,8 @@ query($mint: String!, $since: DateTime!, $till: DateTime!, $limit: Int!) {
       Trade { Account { Address } }
       bought_usd: sum(of: Trade_Side_AmountInUSD, if: {Trade: {Side: {Type: {is: sell}}}})
       sold_usd:   sum(of: Trade_Side_AmountInUSD, if: {Trade: {Side: {Type: {is: buy}}}})
+      bought_amt: sum(of: Trade_Amount, if: {Trade: {Side: {Type: {is: sell}}}})
+      sold_amt:   sum(of: Trade_Amount, if: {Trade: {Side: {Type: {is: buy}}}})
       n_buys:  count(if: {Trade: {Side: {Type: {is: sell}}}})
       n_sells: count(if: {Trade: {Side: {Type: {is: buy}}}})
     }
@@ -131,12 +133,18 @@ def wallet_aggregates(mint: str, since, till, limit: int = 300, url: str = EAP) 
     for r in rows:
         out.append({"wallet": ((r.get("Trade") or {}).get("Account") or {}).get("Address"),
                     "bought_usd": float(r.get("bought_usd") or 0), "sold_usd": float(r.get("sold_usd") or 0),
+                    "bought_amt": float(r.get("bought_amt") or 0), "sold_amt": float(r.get("sold_amt") or 0),
                     "n_buys": int(r.get("n_buys") or 0), "n_sells": int(r.get("n_sells") or 0)})
     df = pd.DataFrame(out)
     if df.empty:
         return df
     df["net_usd"] = df["sold_usd"] - df["bought_usd"]
     df["trades"] = df["n_buys"] + df["n_sells"]
+    # average prices separate skill from flow: a wallet merely distributing inventory shows net_usd > 0
+    # without ever selling above what it paid.
+    df["avg_buy"] = df["bought_usd"] / df["bought_amt"].replace(0, float("nan"))
+    df["avg_sell"] = df["sold_usd"] / df["sold_amt"].replace(0, float("nan"))
+    df["edge"] = df["avg_sell"] / df["avg_buy"] - 1
     return df.sort_values("net_usd", ascending=False).reset_index(drop=True)
 
 
