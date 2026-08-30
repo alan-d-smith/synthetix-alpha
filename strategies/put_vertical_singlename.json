@@ -26,8 +26,8 @@
   "dte_target": 65,
   "dte_min": 40,
   "dte_max": 90,
-  "entry_every_days": 3,
-  "max_positions": 5,
+  "entry_every_days": 1,
+  "max_positions": 12,
   "signal": {
     "iv_rv_ratio": [
       1.27,

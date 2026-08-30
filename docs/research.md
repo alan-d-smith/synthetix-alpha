@@ -677,3 +677,74 @@ sleeve cannot hold overnight. `synthetix_alpha/live/intraday.py`, run from `live
 
 Also fixed here: `backtest_combo` filled a missing sleeve's days with a 0% return — see the correction above.
 
+## The options sleeve was never a 1%/yr strategy, it was running at 5% of capacity
+
+An earlier note in this document reported the options book earning "~1%/yr". That figure was wrong twice over.
+
+First, arithmetic: the sweep that produced it divided total return by a hardcoded six years, but SPY's chain data
+covers three. The deployed spec's real figure was **2.13% CAGR at Sharpe 0.92**.
+
+Second, and more important, that number described the *deployment*, not the edge. Trade-level detail shows why:
+
+| | value |
+|---|---|
+| contracts per trade | **1.03** (median 1, max 2) |
+| trades per year | 20.9 |
+| average P&L per trade | $129 |
+| gate fires | 24.8% of days |
+| average concurrent positions | **2.33 of 5 slots** |
+
+Sizing risks 3% of $100k = $3,000 while a single SPY put spread's max loss is ~$2,500, so the position size is
+quantised to one contract and roughly 93% of the account sits idle. Scaling deployment holds Sharpe almost flat while
+return moves by a factor of twenty:
+
+| config | CAGR | Sharpe | max DD |
+|---|---|---|---|
+| 5 slots, 3%, entry every 3d (old) | 2.13% | 0.92 | −2.0% |
+| 24 slots, 3%, entry every 3d | 3.51% | 0.99 | −2.8% |
+| 24 slots, 3%, **entry daily** | 7.92% | 1.02 | −5.8% |
+| 24 slots, daily, 5% | 16.60% | 1.08 | −11.0% |
+| 24 slots, daily, 10% | 40.50% | 1.12 | −25.7% |
+
+A flat Sharpe across a twentyfold change in return is the signature of an under-deployed strategy rather than a weak
+one. The binding constraint was `entry_every_days: 3`, not the slot count.
+
+**Deployed: 12 slots, 3% per position, daily entry** — 36% total risk, the same bound as before, for
+**5.11% CAGR at Sharpe 1.05**, worst year −0.94%, max drawdown −3.07%. Better than the old config on every axis.
+
+The quantisation also runs the other way, which caught a live bug. Per-position risk had been capped at 1.5% in
+`config/governance.yaml` on the reasoning that smaller positions are safer. They are not: at 1.5% the budget cannot
+afford one contract of a typical spread, the contract count rounds to zero, and only the cheapest spreads trade. That
+biased subset turns **+5.11% CAGR into −0.45%**. The floor is now recorded in the config so it is not lowered again.
+
+## Intraday equity ideas: two rejected, one kept
+
+Tested on Alpaca minute bars, 34 liquid names.
+
+**Cross-sectional short-term reversal** (long past losers, short winners, 1-5 day lookbacks): −0.7% to −5.4%/yr.
+Rejected.
+
+**Intraday momentum** (long the biggest first-30-minute winners, short the losers, held 10:00 to the close) looked
+excellent on 171 sessions: +16.9%/yr at Sharpe 1.59. Extending to 275 sessions cut it to **+7.6%/yr at Sharpe 0.78,
+t = 0.81**, with quarterly returns swinging −19%, +2%, +49%, −17%, +21% — one quarter carried the entire result — and
+it turns negative at 2bps per side against daily full turnover. Rejected. Worth recording as a case where a short
+sample produced a Sharpe that did not survive its own extension.
+
+**Overnight gap fade** survives and is deployed: 1,253 sessions rather than 171, and the detail is in the section above.
+
+## Crypto wallet copy-trading: blocked on data, and the first evidence is discouraging
+
+Two APIs were wired and tested. Bitquery works but the available token is realtime-only — `archive` and `combined`
+return 403, and the realtime dataset retains hours, so wallet skill cannot be measured from history. Birdeye reaches
+its price, token-trade and trader-ranking endpoints, but `/v1/wallet/tx_list` returns 401 on this tier and
+`/defi/txs/token` is capped at offset 10,000, which for TRUMP is about two hours.
+
+What the rankings do show is not encouraging. Comparing the top 600 Solana traders by PnL on two *disjoint*
+consecutive days, only **16 wallets (3%) appear in both**. An earlier comparison of the 30d and 1W rankings showed a
+rank correlation of +0.966, but that is an artifact: the 1W window sits inside the 30d window, so it correlates a
+number with itself. The rankings are also dominated by *unrealised* PnL — entries with `realized_pnl: 0` against tens
+of millions unrealised — so they measure who holds a token that pumped, not who trades well.
+
+Not deployed. A fair persistence test needs realised-PnL rankings over disjoint multi-day windows, or raw wallet
+history from a tier that permits it.
+

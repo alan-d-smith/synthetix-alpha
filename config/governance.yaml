@@ -11,9 +11,10 @@ governance:
   # Maximum sector concentration as % of portfolio NAV
   max_sector_concentration_pct: 0.30  # 30%
 
-  # Maximum number of concurrent open positions. Raised for a breadth strategy: every position is a
-  # defined-risk spread capped at 1.5% of NAV, so 24 slots bounds total risk at ~36%.
-  max_open_positions: 24
+  # Maximum number of concurrent open positions. 12 slots x 3% bounds total risk at 36%. Per-position risk
+  # cannot go below ~3%: a spread's max loss is ~$2.5k, so a smaller budget rounds the contract count to zero
+  # and silently drops most trades (measured: 1.5%/position turns +5.1% CAGR into -0.45%).
+  max_open_positions: 12
 
   # Drawdown halts (hard stop — no new orders)
   max_daily_drawdown_pct: 0.05    # 5% daily
@@ -25,7 +26,7 @@ governance:
     # Must be defined-risk (verticals, butterflies, etc.)
     defined_risk_only: true
     # Maximum premium-at-risk per single options trade (% of NAV)
-    max_premium_at_risk_pct: 0.015  # 1.5%
+    max_premium_at_risk_pct: 0.03    # 3%
 
   # Required fields present in every signal before sizing
   required_fields:
