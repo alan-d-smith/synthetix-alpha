@@ -1,11 +1,11 @@
 {
-  "name": "put_vertical_singlename",
+  "name": "put_vertical_singlename_wide",
   "legs": [
     {
       "type": "put",
       "side": "short",
-      "delta": 0.2,
-      "moneyness": null,
+      "delta": null,
+      "moneyness": -0.04,
       "width": null,
       "dte_offset": 0,
       "ratio": 1
@@ -13,21 +13,23 @@
     {
       "type": "put",
       "side": "long",
-      "delta": 0.1,
-      "moneyness": null,
+      "delta": null,
+      "moneyness": -0.095,
       "width": null,
       "dte_offset": 0,
       "ratio": 1
     }
   ],
   "underlyings": [
-    "AAPL"
+    "AAPL",
+    "NVDA",
+    "TSLA"
   ],
   "dte_target": 65,
   "dte_min": 40,
   "dte_max": 90,
-  "entry_every_days": 1,
-  "max_positions": 12,
+  "entry_every_days": 3,
+  "max_positions": 5,
   "signal": {
     "iv_rv_ratio": [
       1.27,
@@ -49,5 +51,7 @@
   "slippage": 0.5,
   "min_bid": 0.05,
   "min_volume": 25.0,
+  "source": "arXiv:2608.12493 Che & Das, Beyond the Skew-Stickiness Ratio - strikes at the variance velocity trough (-4% forward moneyness at this tenor) instead of fixed delta",
+  "size_scale": null,
   "min_credit": 0.05
 }

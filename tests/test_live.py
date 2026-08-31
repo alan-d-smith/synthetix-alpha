@@ -2,7 +2,6 @@ import datetime as dt
 
 import pandas as pd
 import pytest
-from alpaca.trading.enums import OrderClass, OrderSide, PositionIntent
 
 from synthetix_alpha.live import risk
 from synthetix_alpha.live.execution import (
@@ -59,11 +58,11 @@ def test_client_order_id_is_deterministic_and_order_independent():
 
 def test_build_mleg_order():
     o = build_order(LEGS, 3, -1.85)
-    assert o.order_class == OrderClass.MLEG and o.qty == 3 and o.limit_price == 1.85
-    assert [(l.side, l.position_intent) for l in o.legs] == [
-        (OrderSide.SELL, PositionIntent.SELL_TO_OPEN), (OrderSide.BUY, PositionIntent.BUY_TO_OPEN)]
+    assert o["order_class"] == "mleg" and o["qty"] == 3 and o["limit_price"] == 1.85
+    assert [(l["side"], l["position_intent"]) for l in o["legs"]] == [
+        ("sell", "sell_to_open"), ("buy", "buy_to_open")]
     single = build_order(LEGS[:1], 1, 2.0)
-    assert single.order_class == OrderClass.SIMPLE and single.symbol == LEGS[0]["symbol"]
+    assert single["order_class"] == "simple" and single["legs"][0]["symbol"] == LEGS[0]["symbol"]
     with pytest.raises(ValueError):
         build_order(LEGS * 3, 1, 1.0)
     with pytest.raises(ValueError):
@@ -80,16 +79,14 @@ def test_submit_is_dry_run_by_default_and_idempotent(tmp_path):
 
 
 def test_find_missing_brackets():
-    class P:
-        def __init__(self, s):
-            self.symbol, self.qty, self.unrealized_pl, self.asset_class = s, 1, 0.0, "us_option"
-
-    class O:
-        def __init__(self, s):
-            self.symbol, self.legs = s, None
-
-    missing = find_missing_brackets([P("A"), P("B")], [O("A")])
+    pos = [{"symbol": s, "qty": 1, "unrealized_pl": 0.0, "asset_class": "us_option"} for s in ("A", "B")]
+    missing = find_missing_brackets(pos, [{"symbol": "A", "legs": None}])
     assert [m["symbol"] for m in missing] == ["B"]
+
+
+def test_find_missing_brackets_reads_mleg_legs():
+    pos = [{"symbol": "A", "qty": 1, "asset_class": "us_option"}]
+    assert find_missing_brackets(pos, [{"legs": [{"symbol": "A"}]}]) == []
 
 
 def test_gs_quant_technicals():

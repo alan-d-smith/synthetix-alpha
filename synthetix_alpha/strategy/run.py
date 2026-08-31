@@ -35,9 +35,46 @@ def backtest(spec: Spec, underlyings=None, start=None, end=None, equity0=100_000
     return {"spec": spec.to_dict(), "results": results, "summary": summary}
 
 
+def backtest_combo(specs: list, weights=None, equity0: float = 100_000.0, source: str = "kaggle") -> dict:
+    """Combine sleeves at the return level. Each sleeve runs on full capital, so integer contract rounding
+    behaves as it would standalone; only the weighted returns are blended."""
+    import pandas as pd
+
+    from synthetix_alpha.strategy.engine import metrics, run
+
+    weights = weights or [1.0 / len(specs)] * len(specs)
+    rets, per, trades = [], {}, 0
+    for spec, w in zip(specs, weights):
+        legs = []
+        for u in spec.underlyings:
+            data = EngineData.load(u, dte_max=spec.dte_max + max(l.dte_offset for l in spec.legs) + 1, source=source)
+            r = run(spec, data, equity0)
+            legs.append(r.equity.pct_change())
+            trades += r.metrics["n_trades"]
+        sleeve = pd.concat(legs, axis=1).mean(axis=1)  # equal weight across the sleeve's underlyings
+        per[spec.name] = {"weight": w, "sharpe": round(_sharpe(sleeve), 3)}
+        rets.append(sleeve * w)
+    frame = pd.concat(rets, axis=1)
+    # a sleeve with no data that day is not flat, it is absent: renormalise onto the sleeves that are live
+    live = frame.notna().mul(weights, axis=1).sum(axis=1).replace(0, float("nan"))
+    blended = (frame.fillna(0.0).sum(axis=1) / live).fillna(0.0)
+    curve = equity0 * (1 + blended).cumprod()
+    m = metrics(curve, pd.DataFrame(), equity0)
+    m["n_trades"] = trades
+    return {"per_sleeve": per, "combined": m,
+            "summary": {"mean_sharpe": m["sharpe"], "min_sharpe": m["sharpe"], "worst_year": min(m["yearly"].values()),
+                        "positive_years": sum(v > 0 for v in m["yearly"].values()) / max(len(m["yearly"]), 1),
+                        "worst_drawdown": m["max_drawdown"], "total_trades": trades}}
+
+
+def _sharpe(returns) -> float:
+    r = returns.dropna()
+    return float(r.mean() / r.std() * (252 ** 0.5)) if len(r) > 1 and r.std() > 0 else 0.0
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("spec")
+    p.add_argument("spec", help="a Spec json, or a portfolio json with sleeves and weights")
     p.add_argument("--underlyings", help="comma list; default from spec")
     p.add_argument("--start", type=dt.date.fromisoformat)
     p.add_argument("--end", type=dt.date.fromisoformat)
@@ -46,6 +83,12 @@ def main() -> None:
     p.add_argument("--trades-dir")
     p.add_argument("--source", default="kaggle", choices=["kaggle", "dolt"], help="dolt = 2019-present coarse surfaces (out-of-sample)")
     a = p.parse_args()
+    raw = json.loads(Path(a.spec).read_text())
+    if "sleeves" in raw:
+        c = backtest_combo([Spec.load(x) for x in raw["sleeves"]], raw.get("weights"), a.equity, a.source)
+        print("sleeves:", json.dumps(c["per_sleeve"]))
+        print("combined:", json.dumps({k: round(v, 4) for k, v in c["summary"].items()}))
+        return
     spec = Spec.load(a.spec)
     out = backtest(spec, a.underlyings.split(",") if a.underlyings else None, a.start, a.end, a.equity, a.trades_dir, a.source)
     if a.out:

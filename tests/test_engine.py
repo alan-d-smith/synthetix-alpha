@@ -79,3 +79,100 @@ def test_min_credit_filter():
     assert run(spec, make_data([410.0] * 5)).metrics["n_trades"] == 0
     spec.min_credit = 0.2
     assert run(spec, make_data([410.0] * 5)).metrics["n_trades"] == 1
+
+
+def test_days_since_shock_is_lookahead_free():
+    import numpy as np
+    import pandas as pd
+    from synthetix_alpha.strategy.data import days_since_shock
+    idx = pd.date_range("2021-01-01", periods=10, freq="D")
+    spot = pd.Series([100, 100, 100, 100, 90, 91, 92, 93, 94, 95], index=idx, dtype=float)
+    rv = pd.Series(0.16, index=idx)  # ~1% daily sigma, so the -10% day is a shock
+    d = days_since_shock(spot, rv, k=3.0)
+    assert d.iloc[4] == 0 and d.iloc[5] == 1 and d.iloc[7] == 3
+    assert np.isnan(d.iloc[0])  # nothing before the first shock
+
+
+def test_backtest_combo_blends_returns_not_capital(monkeypatch):
+    import pandas as pd
+    import synthetix_alpha.strategy.engine as eng
+    import synthetix_alpha.strategy.run as runmod
+
+    idx = pd.date_range("2021-01-01", periods=60, freq="D")
+    curves = {"A": pd.Series((100_000 * 1.001 ** pd.Series(range(60))).to_numpy(), index=idx),
+              "B": pd.Series((100_000 * 1.002 ** pd.Series(range(60))).to_numpy(), index=idx)}
+    seen = []
+
+    class FakeResult:
+        def __init__(self, eq):
+            self.equity, self.metrics = eq, {"n_trades": 10}
+
+    def fake_run(spec, data, equity0):
+        seen.append(equity0)
+        return FakeResult(curves[spec.name])
+
+    monkeypatch.setattr(eng, "run", fake_run)
+    monkeypatch.setattr(runmod.EngineData, "load", staticmethod(lambda *a, **k: object()))
+    a = Spec("A", legs=[{"type": "put", "side": "short", "delta": 0.3}], underlyings=["X"])
+    b = Spec("B", legs=[{"type": "put", "side": "short", "delta": 0.3}], underlyings=["X"])
+    out = runmod.backtest_combo([a, b], weights=[0.5, 0.5], equity0=100_000.0)
+    assert seen == [100_000.0, 100_000.0]  # each sleeve keeps full capital, so contract rounding is unchanged
+    assert out["summary"]["total_trades"] == 20 and out["combined"]["total_return"] > 0
+
+
+def test_split_adjustment_preserves_position_value():
+    """A 4:1 split must leave the position worth the same: four contracts at a quarter the strike."""
+    import datetime as dt
+
+    from synthetix_alpha.strategy.engine import OpenLeg, Position, _apply_split
+    legs = [OpenLeg("AAPL201016P00435000", "put", -1, 1, 435.0, dt.date(2020, 10, 16), 11.095),
+            OpenLeg("AAPL201016P00395000", "put", 1, 1, 395.0, dt.date(2020, 10, 16), 4.820)]
+    pos = Position(legs=legs, contracts=1, entry_date=dt.date(2020, 8, 28),
+                   entry_value=-6.275, expiration=dt.date(2020, 10, 16))
+    before = pos.value() * pos.contracts
+    assert _apply_split(pos, 4.0)
+    assert pos.contracts == 4
+    assert pos.legs[0].strike == 435.0 / 4 and pos.legs[1].strike == 395.0 / 4
+    assert pos.legs[0].symbol == "AAPL201016P00108750"
+    assert pos.legs[1].symbol == "AAPL201016P00098750"
+    assert abs(pos.value() * pos.contracts - before) < 1e-9, "a split must not create or destroy value"
+    assert abs(pos.entry_value - (-6.275 / 4)) < 1e-9, "per-share entry must scale with the strike"
+
+
+def test_split_adjustment_refuses_fractional_ratios():
+    """A 3:2 split cannot keep contract counts whole, so it must be declined rather than silently rounded."""
+    import datetime as dt
+
+    from synthetix_alpha.strategy.engine import OpenLeg, Position, _apply_split
+    pos = Position(legs=[OpenLeg("X201016P00100000", "put", -1, 1, 100.0, dt.date(2020, 10, 16), 1.0)],
+                   contracts=1, entry_date=dt.date(2020, 8, 28), entry_value=-1.0,
+                   expiration=dt.date(2020, 10, 16))
+    assert not _apply_split(pos, 1.5)
+    assert pos.contracts == 1 and pos.legs[0].strike == 100.0
+
+
+def test_engine_data_exposes_split_dates():
+    from synthetix_alpha.strategy.data import EngineData
+    assert EngineData._load_splits("SPY") == {}, "SPY has never split"
+    aapl = EngineData._load_splits("AAPL")
+    assert aapl.get(__import__("datetime").date(2020, 8, 31)) == 4.0
+
+
+def test_allocation_schemes_are_normalised_and_equal_is_parameter_free():
+    import numpy as np
+    import pandas as pd
+
+    from synthetix_alpha.strategy import allocate
+    rng = np.random.default_rng(0)
+    R = pd.DataFrame(rng.normal(0.0005, 0.01, (400, 3)), columns=list("abc"))
+    for kind in ("equal", "invvol", "minvar", "tangency_long", "tangency"):
+        w = allocate.weights(R, kind)
+        assert abs(w.sum() - 1) < 1e-9, f"{kind} weights must sum to one"
+    assert np.allclose(allocate.weights(R, "equal"), 1 / 3), "equal weight must ignore the data entirely"
+    assert (allocate.weights(R, "tangency_long") >= 0).all()
+
+
+def test_sharpe_standard_error_grows_as_the_sample_shrinks():
+    from synthetix_alpha.strategy import allocate
+    assert allocate.sharpe_se(1.5, 5.0) < allocate.sharpe_se(1.5, 1.0)
+    assert allocate.sharpe_se(1.5, 0.6) > 1.0, "a sub-year sample cannot resolve Sharpe differences"

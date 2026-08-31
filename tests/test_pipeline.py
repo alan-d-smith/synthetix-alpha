@@ -235,12 +235,36 @@ def test_form_orders_without_chain() -> None:
     assert len(o["legs"]) == 2
 
 
-def test_resolve_legs_abstract() -> None:
+def test_resolve_legs_abstract(monkeypatch) -> None:
+    """Falls back to placeholder symbols when no chain data is available.
+
+    The chain has to be stubbed out. Without this the test only passes on a machine with no
+    datasets/ present, and silently flips to the resolved-OCC path anywhere data exists.
+    """
+    import synthetix_alpha.strategy.data as sdata
+    monkeypatch.setattr(sdata, "build", lambda *a, **k: (pd.DataFrame(), pd.DataFrame()))
     orch = PipelineOrchestrator(mock_llm=True)
     spec = orch._get_spec()
     legs = orch._resolve_legs(spec, "SPY", pd.DataFrame())
     assert len(legs) == 2
     assert all("OCC_PLACEHOLDER" in l["symbol"] for l in legs)
+
+
+def test_resolve_legs_uses_real_symbols_when_chain_is_available() -> None:
+    """The counterpart path, which is the one that runs live. Skipped where there is no chain to load."""
+    import pytest
+
+    from synthetix_alpha.strategy.data import build as build_chain
+    try:
+        chains, _ = build_chain("SPY", source="dolt")
+    except Exception as e:
+        pytest.skip(f"no chain data available: {type(e).__name__}")
+    if chains.empty:
+        pytest.skip("no chain data available")
+    orch = PipelineOrchestrator(mock_llm=True)
+    legs = orch._resolve_legs(orch._get_spec(), "SPY", pd.DataFrame())
+    assert len(legs) == 2
+    assert all("OCC_PLACEHOLDER" not in l["symbol"] for l in legs)
 
 
 def test_system_prompt_fields_match_schema() -> None:

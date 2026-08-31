@@ -23,6 +23,11 @@ SURFACE, INK, INK_2, MUTED = "#fcfcfb", "#0b0b0b", "#52514e", "#898781"
 GRID, AXIS = "#e1e0d9", "#c3c2b7"
 SERIES = ["#2a78d6", "#eb6834", "#1baf7a"]  # validated adjacent + all-pairs (light)
 POS, NEG = "#2a78d6", "#e34948"  # diverging poles, gray midpoint at zero
+WIN, LOSS = "#1baf7a", "#e34948"  # fill outcome markers, distinct from the series lines
+# Underlying lines in the fills figure. Green and red are reserved there for trade outcome, so these
+# five avoid both hues. Validated against the light surface: all pairs clear CVD and normal-vision
+# separation, worst adjacent dE 14.4 (deutan). Never cycled: more underlyings than slots is refused.
+SERIES_FILLS = ["#2a78d6", "#eb6834", "#7b52ab", "#00a3b4", "#a8761f"]
 OUT = Path("docs/img")
 
 STYLE = {
@@ -53,11 +58,12 @@ def _finish(ax, title, subtitle=None, pct_y=True):
     ax.set_axisbelow(True)
 
 
-def equity_panel(ax, curves: dict[str, pd.Series]):
+def equity_panel(ax, curves: dict[str, pd.Series], palette: list[str] | None = None):
+    palette = palette or SERIES
     for i, (name, eq) in enumerate(curves.items()):
         r = eq / eq.iloc[0] - 1
-        ax.plot(r.index, r.values, color=SERIES[i % len(SERIES)], label=name, zorder=3)
-        ax.annotate(f" {name} {r.iloc[-1]:+.1%}", (r.index[-1], r.iloc[-1]), color=SERIES[i % len(SERIES)],
+        ax.plot(r.index, r.values, color=palette[i % len(palette)], label=name, zorder=3)
+        ax.annotate(f" {name} {r.iloc[-1]:+.1%}", (r.index[-1], r.iloc[-1]), color=palette[i % len(palette)],
                     fontsize=8.5, fontweight="semibold", va="center", zorder=4)
     ax.axhline(0, color=AXIS, lw=0.8, zorder=1)
     ax.margins(x=0.16)
@@ -150,6 +156,103 @@ def fragility_panel(ax, fragility: dict, base: float):
     ax.set_xlabel("selection score (clipped at −1)")
 
 
+def _dates(idx) -> pd.DatetimeIndex:
+    return pd.to_datetime(pd.Series(list(idx)))
+
+
+def fills_panel(ax, series: dict[str, pd.Series], trades: dict[str, pd.DataFrame], normalise: bool) -> None:
+    """Underlying price with an entry marker per trade and an exit marker coloured by outcome."""
+    if len(series) > len(SERIES_FILLS):
+        raise ValueError(f"{len(series)} underlyings but only {len(SERIES_FILLS)} distinct hues; "
+                         "cycling would make two of them identical")
+    for i, (name, spot) in enumerate(series.items()):
+        colour = SERIES_FILLS[i]
+        y = spot / spot.iloc[0] * 100 if normalise else spot
+        ax.plot(_dates(y.index), y.values, color=colour, linewidth=1.6, zorder=2,
+                label=f"{name} (rebased)" if normalise else name)
+        tr = trades.get(name)
+        if tr is None or tr.empty:
+            continue
+        lookup = pd.Series(y.values, index=pd.to_datetime(pd.Series(list(y.index))).values)
+        for col, marker, size in (("entry", "o", 16), ("exit", "v", 26)):
+            when = pd.to_datetime(tr[col])
+            price = lookup.reindex(when.values).values
+            if col == "entry":
+                ax.scatter(when, price, s=size, marker=marker, facecolors="none",
+                           edgecolors=INK_2, linewidths=0.8, zorder=4)
+            else:
+                won = tr["pnl"].values > 0
+                ax.scatter(when[won], price[won], s=size, marker=marker, color=WIN, zorder=5,
+                           linewidths=0.5, edgecolors=SURFACE)
+                ax.scatter(when[~won], price[~won], s=size, marker=marker, color=LOSS, zorder=6,
+                           linewidths=0.5, edgecolors=SURFACE)
+    _mark_splits(ax, series)
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:,.0f}"))
+    ax.set_axisbelow(True)
+
+
+def _mark_splits(ax, series: dict[str, pd.Series]) -> None:
+    """Flag stock splits. Kaggle chains are not split adjusted, so the price line steps and a reader
+    would otherwise take a 4:1 split for a 75% crash."""
+    from synthetix_alpha.data import yf
+
+    for name, spot in series.items():
+        idx = list(spot.index)
+        try:
+            ratios = yf.splits(name)
+        except Exception:
+            continue
+        for when, ratio in ratios.items():
+            if not (idx[0] <= when <= idx[-1]):
+                continue
+            ax.axvline(pd.Timestamp(when), color=MUTED, linewidth=0.9, linestyle=(0, (4, 3)), zorder=1)
+            ax.annotate(f"{name} {ratio:g}:1 split", (pd.Timestamp(when), 0.97), xycoords=("data", "axes fraction"),
+                        color=MUTED, fontsize=7.5, ha="right", va="top", rotation=90,
+                        xytext=(-3, 0), textcoords="offset points")
+
+
+def strategy_figure(spec: Spec, out_dir: Path = OUT, source: str = "kaggle") -> Path | None:
+    """One PNG per strategy: the underlying with fills on top, the equity it produced underneath."""
+    from synthetix_alpha.strategy import EngineData
+    from synthetix_alpha.strategy.engine import run
+
+    spots, trades, curves = {}, {}, {}
+    for u in spec.underlyings:
+        try:
+            data = EngineData.load(u, dte_max=spec.dte_max + 1, source=source)
+            out = run(spec, data, 100_000.0)
+        except Exception:
+            continue
+        tr = pd.DataFrame(out.trades)
+        if tr.empty:
+            continue
+        spots[u], trades[u], curves[u] = data.features["spot"].dropna(), tr, out.equity
+    if not spots:
+        return None
+
+    n_trades = sum(len(t) for t in trades.values())
+    wins = sum(int((t["pnl"] > 0).sum()) for t in trades.values())
+    with mpl.rc_context(STYLE):
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 7.4), sharex=True,
+                                       gridspec_kw={"height_ratios": [1.15, 1], "hspace": 0.28})
+        multi = len(spots) > 1
+        fills_panel(ax1, spots, trades, normalise=multi)
+        _finish(ax1, f"{spec.name} — underlying and fills",
+                f"{n_trades} trades, {wins/max(n_trades,1):.0%} profitable. Hollow circle is the entry; "
+                f"triangle is the exit, green for a profit and red for a loss.", pct_y=False)
+        ax1.set_ylabel("rebased to 100" if multi else "price ($)")
+        if multi:
+            ax1.legend(loc="upper left", ncols=min(len(spots), 4))
+
+        equity_panel(ax2, curves, palette=SERIES_FILLS)
+        ax2.set_ylabel("return")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        path = out_dir / f"{spec.name}_fills.png"
+        fig.savefig(path)
+        plt.close(fig)
+    return path
+
+
 def gate_sweep(spec: Spec, gates=(None, 1.0, 1.1, 1.15, 1.2, 1.25, 1.3)) -> list[dict]:
     deployed = _deployed_gate(spec)
     levels = sorted({g for g in gates if g is not None} | ({deployed} if deployed else set()))
@@ -221,12 +324,31 @@ def _deployed_gate(spec: Spec) -> float | None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("spec")
+    ap.add_argument("spec", nargs="?", help="omit with --fills-all to do every strategy")
     ap.add_argument("--out", default=str(OUT))
     ap.add_argument("--verify", help="verify.py JSON, adds the fragility panel")
     ap.add_argument("--no-sweep", action="store_true")
+    ap.add_argument("--fills", action="store_true", help="underlying-with-fills figure instead of the research set")
+    ap.add_argument("--fills-all", action="store_true", help="the fills figure for every spec in strategies/")
     a = ap.parse_args()
-    for p in build(Spec.load(a.spec), Path(a.out), not a.no_sweep, a.verify):
+    out = Path(a.out)
+    if a.fills_all:
+        for f in sorted(Path("strategies").glob("*.json")):
+            if f.name == "portfolio.json":
+                continue
+            try:
+                path = strategy_figure(Spec.load(f), out)
+            except Exception as e:
+                print(f"{f.name}: {type(e).__name__}: {e}")
+                continue
+            print(path or f"{f.name}: no trades")
+        return
+    if not a.spec:
+        ap.error("spec is required unless --fills-all")
+    if a.fills:
+        print(strategy_figure(Spec.load(a.spec), out))
+        return
+    for p in build(Spec.load(a.spec), out, not a.no_sweep, a.verify):
         print(p)
 
 

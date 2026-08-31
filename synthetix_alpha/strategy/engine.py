@@ -74,6 +74,32 @@ def _mark(pos: Position, chain: Optional[pd.DataFrame], spot: float, date: dt.da
                 leg.mark = mid
 
 
+def _apply_split(pos: Position, ratio: float) -> bool:
+    """Adjust an open position through a stock split, the way OCC does it.
+
+    A 4:1 split turns one 435-strike contract into four at 108.75. Value is preserved, so contracts
+    multiply by the ratio while strike, mark and the per-share entry price all divide by it. Costs are
+    already in dollars and are left alone. Without this the old OCC symbols disappear from the chain and
+    the position is marked at a stale pre-split price for the rest of its life.
+    """
+    from synthetix_alpha.data.occ import build_occ_symbol
+
+    n = int(round(ratio))
+    if abs(ratio - n) > 1e-9 or n < 2:
+        return False  # reverse or fractional splits would not keep contract counts whole
+    for leg in pos.legs:
+        if leg.type == "stock":
+            leg.strike = 0.0
+        else:
+            leg.strike /= ratio
+            leg.symbol = build_occ_symbol(leg.symbol[:len(leg.symbol) - 15], leg.expiration, leg.type, leg.strike)
+        if leg.mark == leg.mark:
+            leg.mark /= ratio
+    pos.entry_value /= ratio
+    pos.contracts *= n
+    return True
+
+
 def _pick_expiration(chain: pd.DataFrame, spec: Spec, offset: int) -> Optional[object]:
     c = chain[chain["dte"].between(spec.dte_min + offset, spec.dte_max + offset)]
     if c.empty:
@@ -117,7 +143,19 @@ def max_loss(legs: list[OpenLeg], entry_value: float, spot: float) -> float:
     return max(0.0, -min(pnl))
 
 
-def size(spec: Spec, legs: list[OpenLeg], entry_value: float, spot: float, equity: float) -> int:
+def size_multiplier(spec: Spec, features: Optional[pd.Series]) -> float:
+    """Scale the risk budget with the strength of a signal, 0.5x at lo to 1.5x at hi."""
+    if not spec.size_scale or features is None:
+        return 1.0
+    name, lo, hi = spec.size_scale
+    v = features.get(name)
+    if v is None or np.isnan(v):
+        return 0.0
+    return 0.5 + float(np.clip((v - lo) / (hi - lo), 0.0, 1.0))
+
+
+def size(spec: Spec, legs: list[OpenLeg], entry_value: float, spot: float, equity: float,
+         features: Optional[pd.Series] = None) -> int:
     if spec.sizing == "notional":
         risk = spot * MULT
     elif spec.sizing == "margin":
@@ -126,7 +164,8 @@ def size(spec: Spec, legs: list[OpenLeg], entry_value: float, spot: float, equit
         risk = max_loss(legs, entry_value, spot) * MULT
     if risk <= 0:
         return 0
-    return int(min(spec.max_contracts, math.floor(equity * spec.risk_fraction / risk)))
+    budget = equity * spec.risk_fraction * size_multiplier(spec, features)
+    return int(min(spec.max_contracts, math.floor(budget / risk)))
 
 
 def _in_range(f: pd.Series, signal: dict) -> bool:
@@ -141,7 +180,10 @@ def run(spec: Spec, data: EngineData, equity0: float = 100_000.0) -> Result:
     cash, positions, trades, curve, last_entry = equity0, [], [], {}, None
     for date in data.dates:
         chain, spot = data.chain(date), float(data.features.at[date, "spot"])
+        ratio = getattr(data, "splits", {}).get(date)
         for pos in list(positions):
+            if ratio:
+                _apply_split(pos, ratio)
             _mark(pos, chain, spot, date)
             pnl = (pos.value() - pos.entry_value) * MULT * pos.contracts
             premium = abs(pos.entry_value) * MULT * pos.contracts
@@ -165,7 +207,7 @@ def run(spec: Spec, data: EngineData, equity0: float = 100_000.0) -> Result:
             if legs:
                 fill = sum(l.side * l.ratio * _fill(l, chain, spot, l.side, spec.slippage) for l in legs)
                 equity = cash + sum(p.value() * MULT * p.contracts for p in positions)
-                n = size(spec, legs, fill, spot, equity)
+                n = size(spec, legs, fill, spot, equity, data.features.loc[date])
                 if spec.min_credit is not None and fill < 0 and -fill < spec.min_credit * max_loss(legs, fill, spot):
                     n = 0
                 cost = spec.commission * sum(l.ratio for l in legs if l.type != "stock") * n

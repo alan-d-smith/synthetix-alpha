@@ -11,7 +11,7 @@ import pandas as pd
 from gs_quant.timeseries.technicals import bollinger_bands, macd, relative_strength_index
 
 from synthetix_alpha import config
-from synthetix_alpha.data import kaggle, vix, yf
+from synthetix_alpha.data import fomc, kaggle, vix, yf
 
 COLS = ["expiration", "type", "strike", "bid", "ask", "mid", "iv", "delta", "volume", "underlying_price"]
 CACHE = config.ROOT / "datasets" / "cache" / "engine"
@@ -63,7 +63,16 @@ def features(df: pd.DataFrame, spot: Optional[pd.Series] = None, underlying: Opt
     f["iv_rank"] = f["atm_iv"].rolling(252, min_periods=60).rank(pct=True)
     f["iv_rv_ratio"] = f["atm_iv"] / f["rv20"]
     f["term_slope"] = f["far_iv"] - f["atm_iv"]
-    return f.drop(columns="far_iv").join(technicals(f["spot"])).join(vol_index(underlying, f.index, f["rv20"])).join(underlying_flow(underlying, f.index)).join(earnings(underlying, f.index))
+    f["days_since_shock"] = days_since_shock(f["spot"], f["rv20"])
+    return f.drop(columns="far_iv").join(technicals(f["spot"])).join(vol_index(underlying, f.index, f["rv20"])).join(underlying_flow(underlying, f.index)).join(earnings(underlying, f.index)).join(macro_events(f.index))
+
+
+def macro_events(index) -> pd.DataFrame:
+    """Days to the next scheduled FOMC statement; empty if the calendar is unavailable."""
+    try:
+        return fomc.days_to_fomc(index).to_frame()
+    except Exception:
+        return pd.DataFrame(index=index)
 
 
 def earnings(underlying: Optional[str], index) -> pd.DataFrame:
@@ -121,6 +130,16 @@ def vol_index(underlying: Optional[str], index, rv20: pd.Series) -> pd.DataFrame
     return pd.DataFrame(out, index=index)
 
 
+def days_since_shock(spot: pd.Series, rv20: pd.Series, k: float = 3.0, horizon: int = 120) -> pd.Series:
+    """Trading days since the last volatility quake, a move beyond k sigma of vol as known the prior day."""
+    ret = spot.pct_change()
+    sigma = (rv20.shift(1) / np.sqrt(252)).replace(0, np.nan)
+    shock = (ret.abs() > k * sigma).fillna(False)
+    idx = pd.Series(range(len(spot)), index=spot.index)
+    last = idx.where(shock).ffill()
+    return (idx - last).where(lambda d: d <= horizon).astype("float64")
+
+
 def technicals(spot: pd.Series) -> pd.DataFrame:
     """RSI, Bollinger position and MACD from gs-quant, all trailing."""
     spot = spot.astype("float64")  # gs-quant writes float64 intermediates into the series
@@ -155,6 +174,17 @@ class EngineData:
         self.underlying, self.features = underlying, feats
         self._by_date = {d: g.set_index("symbol") for d, g in chains.groupby(level=0, sort=True)}
         self.dates = sorted(self._by_date)
+        self.splits = self._load_splits(underlying)
+
+    @staticmethod
+    def _load_splits(underlying: str) -> dict:
+        """Effective date -> ratio. Chains are not split adjusted, so open positions must be adjusted
+        on these dates or their contracts vanish and the mark silently freezes."""
+        from synthetix_alpha.data import yf
+        try:
+            return {d: float(r) for d, r in yf.splits(underlying).items() if float(r) > 0}
+        except Exception:
+            return {}
 
     @classmethod
     def load(cls, underlying: str, dte_max: int = 120, start: Optional[dt.date] = None, end: Optional[dt.date] = None,

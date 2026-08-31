@@ -50,6 +50,35 @@ surface = dolt.load_chains(["SPY", "QQQ"], dt.date(2023, 1, 1), dt.date(2024, 12
 vol = dolt.load_volatility(["SPY"], dt.date(2023, 1, 1), dt.date(2024, 12, 31))
 ```
 
+## Agentic research loop
+
+New arXiv papers feed the strategy search. The deterministic half (search, relevance filter, PDF download, library of
+papers already seen, backtesting what comes back) lives in `synthetix_alpha/research/`; the reading and spec-writing is
+done by agents via [workflows/paper_research.js](workflows/paper_research.js).
+
+```sh
+python -m synthetix_alpha.research.loop find --limit 5     # queue papers, print the agent brief
+# hand the brief to the workflow, which writes Spec JSON files
+python -m synthetix_alpha.research.loop evaluate           # backtest them against the incumbent
+```
+
+Papers already seen are recorded in [docs/papers.jsonl](docs/papers.jsonl), so repeat runs only surface new work. The
+brief tells the agent that a mean-Sharpe gain under 0.54 is inside this sample's noise, which is the floor measured in
+[docs/research.md](docs/research.md).
+
+## Alpaca CLI
+
+Orders, account and position reads go through Alpaca's CLI (`alpacahq/cli`), not the SDK. `synthetix_alpha/live/cli.py`
+is the transport; the SDK is used only for historical market data.
+
+```bash
+go install github.com/alpacahq/cli/cmd/alpaca@latest   # or: brew install alpacahq/tap/cli
+# or drop the release binary at tools/alpaca.exe; override with ALPACA_BIN
+alpaca account get                                     # ALPACA_API_KEY / ALPACA_SECRET_KEY from .env
+```
+
+Paper is the CLI default and `live/execution.py` refuses to run if `ALPACA_LIVE_TRADE` is set.
+
 ## Live execution and risk gates
 
 `synthetix_alpha/live/` — paper-only order submission and the deterministic gates that sit in front of it.
@@ -81,6 +110,15 @@ python -m synthetix_alpha.strategy.run strategies/put_vertical_ivrv.json        
 python -m synthetix_alpha.strategy.verify strategies/put_vertical_ivrv.json --oos AAPL --dolt SPY
 python -m synthetix_alpha.strategy.plots strategies/put_vertical_ivrv.json    # figures -> docs/img/
 python -m synthetix_alpha.strategy.progress strategies/put_vertical_ivrv.json --gen 3   # append to docs/progress.md
+```
+
+`strategies/portfolio.json` runs three sleeves together: index put spreads, single-name put spreads gated on
+earnings, and a bear call spread for downtrends. The third is negatively correlated with the other two (-0.16, -0.24),
+so on the period where all three run the blend reaches Sharpe 1.34 against 0.98 / 0.88 / 0.41 standalone, with a
+smaller drawdown than any sleeve. Weights are equal by choice, not optimised.
+
+```sh
+python -m synthetix_alpha.strategy.run strategies/portfolio.json
 ```
 
 Generation-by-generation results are logged with UTC timestamps in [docs/progress.md](docs/progress.md).

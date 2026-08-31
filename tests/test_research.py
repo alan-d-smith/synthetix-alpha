@@ -1,0 +1,148 @@
+import datetime as dt
+import json
+
+
+from synthetix_alpha.research import arxiv, loop
+
+FEED = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>http://arxiv.org/abs/2608.11111v1</id>
+    <published>2026-08-20T00:00:00Z</published><updated>2026-08-20T00:00:00Z</updated>
+    <title>Harvesting the Variance Risk Premium with Option Spreads</title>
+    <summary>We study implied volatility richness and credit spread returns.</summary>
+    <author><name>A Researcher</name></author>
+    <category term="q-fin.PM"/>
+    <link title="pdf" href="http://arxiv.org/pdf/2608.11111v1"/>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2608.22222v1</id>
+    <published>2026-08-19T00:00:00Z</published><updated>2026-08-19T00:00:00Z</updated>
+    <title>Implied Volatility on a Uniswap DEX</title>
+    <summary>A crypto AMM proxy for implied volatility in decentralised markets.</summary>
+    <author><name>B Researcher</name></author>
+    <category term="q-fin.TR"/>
+    <link title="pdf" href="http://arxiv.org/pdf/2608.22222v1"/>
+  </entry>
+</feed>"""
+
+
+def test_parse_feed():
+    papers = arxiv.parse(FEED)
+    assert [p["id"] for p in papers] == ["2608.11111v1", "2608.22222v1"]
+    p = papers[0]
+    assert p["published"] == "2026-08-20" and p["categories"] == ["q-fin.PM"]
+    assert p["pdf_url"].endswith("2608.11111v1") and p["authors"] == ["A Researcher"]
+
+
+def test_relevance_ranks_options_over_crypto():
+    options, crypto = arxiv.parse(FEED)
+    assert arxiv.relevance(options) > 0.5
+    assert arxiv.relevance(crypto) == 0.0  # excluded regardless of the volatility keywords
+
+
+def test_library_is_append_only_and_dedupes(tmp_path):
+    lib = tmp_path / "papers.jsonl"
+    papers = arxiv.parse(FEED)
+    arxiv.record(papers, "queued", lib)
+    arxiv.record(papers, "done", lib)  # same ids must not be written twice
+    assert len(arxiv.load_library(lib)) == 2
+    assert len(lib.read_text(encoding="utf-8").strip().splitlines()) == 2
+    assert arxiv.load_library(lib)["2608.11111v1"]["status"] == "queued"
+
+
+def test_pending_skips_seen_and_filters(tmp_path, monkeypatch):
+    lib = tmp_path / "papers.jsonl"
+    monkeypatch.setattr(arxiv, "_get", lambda params: FEED)
+    first = arxiv.pending(path=lib, since_days=3650)
+    assert [p["id"] for p in first] == ["2608.11111v1"]  # crypto entry filtered out by relevance
+    arxiv.record(first, "queued", lib)
+    assert arxiv.pending(path=lib, since_days=3650) == []
+
+
+def test_since_filter(monkeypatch):
+    monkeypatch.setattr(arxiv, "_get", lambda params: FEED)
+    assert len(arxiv.search(since=dt.date(2026, 8, 20))) == 1
+    assert arxiv.search(since=dt.date(2027, 1, 1)) == []
+
+
+def test_brief_lists_papers_and_noise_floor():
+    text = loop.brief(arxiv.parse(FEED)[:1])
+    assert "2608.11111v1" in text and str(loop.NOISE_FLOOR) in text and "missing_primitives" in text
+
+
+def test_evaluate_reports_errors_without_raising(tmp_path):
+    (tmp_path / "paper_broken.json").write_text(json.dumps({"name": "broken", "legs": []}))
+    rows = loop.evaluate(tmp_path, incumbent=None, log=False)
+    assert len(rows) == 1 and "error" in rows[0]
+
+
+def test_spec_carries_provenance(tmp_path):
+    from synthetix_alpha.strategy.spec import Spec
+    s = Spec("paper_x", legs=[{"type": "put", "side": "short", "delta": 0.3}],
+             source="arXiv:2608.20020v1 Reconfiguration Premium")
+    s.save(tmp_path / "s.json")
+    assert Spec.load(tmp_path / "s.json").source.startswith("arXiv:2608.20020v1")
+
+
+def test_evaluate_reports_source(tmp_path):
+    from synthetix_alpha.strategy.spec import Spec
+    Spec("paper_demo", legs=[{"type": "put", "side": "short", "delta": 0.3},
+                             {"type": "put", "side": "long", "delta": 0.15}],
+         underlyings=["SPY"], source="arXiv:9999.1 Demo").save(tmp_path / "paper_demo.json")
+    rows = loop.evaluate(tmp_path, incumbent=None, log=False)
+    assert rows[0].get("source") == "arXiv:9999.1 Demo"
+
+
+def test_fomc_parsers():
+    from synthetix_alpha.data import fomc
+    cur = ('<div class="panel panel-default"><div>2022 FOMC Meetings</div>'
+           '<div class="fomc-meeting__month"><strong>January</strong></div><div class="fomc-meeting__date">25-26</div>'
+           '<div class="fomc-meeting__month"><strong>August</strong></div><div class="fomc-meeting__date">22</div>(notation vote)</div>')
+    assert [d.isoformat() for d in fomc.parse(cur)] == ["2022-01-26"]  # notation votes are not statements
+    hist = ("<h5>January 30-31 Meeting - 2018</h5><h5>Jul/Aug 31-1 Meeting - 2018</h5>"
+            "<h5>March 15 (unscheduled) Meeting - 2020</h5>")
+    assert [d.isoformat() for d in fomc.parse_historical(hist)] == ["2018-01-31", "2018-08-01"]
+
+
+def test_days_to_fomc(tmp_path):
+    import datetime as dt
+    import pandas as pd
+    from synthetix_alpha.data import fomc
+    cache = tmp_path / "f.parquet"
+    pd.DataFrame({"date": [dt.date(2022, 1, 26), dt.date(2022, 3, 16)]}).to_parquet(cache, index=False)
+    d = fomc.days_to_fomc([dt.date(2022, 1, 20), dt.date(2022, 1, 26), dt.date(2022, 2, 1)], cache=cache)
+    assert list(d) == [6.0, 0.0, 43.0]
+
+
+def test_bitquery_requires_token(monkeypatch):
+    import pytest
+    from synthetix_alpha.data import bitquery
+    monkeypatch.delenv("BITQUERY_TOKEN", raising=False)
+    with pytest.raises(RuntimeError, match="BITQUERY_TOKEN"):
+        bitquery.token()
+
+
+def test_bitquery_retries_on_429(monkeypatch):
+    from synthetix_alpha.data import bitquery
+
+    class R:
+        def __init__(self, code): self.status_code = code
+        def raise_for_status(self): pass
+        def json(self): return {"data": {"ok": 1}}
+
+    calls = []
+    monkeypatch.setenv("BITQUERY_TOKEN", "x")
+    monkeypatch.setattr(bitquery.time, "sleep", lambda s: None)
+    monkeypatch.setattr(bitquery.httpx, "post", lambda *a, **k: calls.append(1) or R(429 if len(calls) < 3 else 200))
+    assert bitquery.query("{}") == {"ok": 1} and len(calls) == 3
+
+
+def test_wallet_aggregates_computes_net(monkeypatch):
+    from synthetix_alpha.data import bitquery
+    monkeypatch.setattr(bitquery, "query", lambda *a, **k: {"Solana": {"DEXTradeByTokens": [
+        {"Trade": {"Account": {"Address": "W1"}}, "bought_usd": "100", "sold_usd": "250", "n_buys": "3", "n_sells": "4"},
+        {"Trade": {"Account": {"Address": "W2"}}, "bought_usd": "500", "sold_usd": "100", "n_buys": "2", "n_sells": "1"}]}})
+    df = bitquery.wallet_aggregates("mint", "2026-01-01", "2026-01-02")
+    assert list(df["wallet"]) == ["W1", "W2"]  # sorted by net extracted
+    assert df.iloc[0]["net_usd"] == 150 and df.iloc[0]["trades"] == 7

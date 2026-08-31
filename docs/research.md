@@ -299,3 +299,904 @@ python -m synthetix_alpha.strategy.plots  strategies/put_vertical_ivrv.json     
 The plot script writes `docs/img/<spec name>_performance.png` and `<spec name>_research.png`. If you change a spec or
 the engine on a branch, rerun both commands and commit the regenerated PNGs alongside the updated tables here. The gate
 sweep re-runs one backtest per threshold, so it takes a few minutes; pass `--no-sweep` to skip it.
+
+## arXiv intake 2026-08-29
+
+Eight papers were read end to end and translated into the spec DSL where they had a tradable object. Every
+translation was scored against the deployed `put_vertical_ivrv` on the same window, which re-ran identically three
+times during this batch (score **+0.5195**, mean Sharpe 0.9184, 102 trades), so all comparisons below are like-for-like.
+
+**Papers read**
+
+| arXiv | what it is | specs | best score |
+|---|---|---|---|
+| 2608.24786v1 — Harvesting the VRP: Learning-to-Rank | LambdaRank picks 1 of 9 short SPXW 0DTE puts daily | 4 | **0.428** |
+| 2608.20020v1 — The Reconfiguration Premium | eigenspace rotation as an unspanned VRP dimension | 2 | 0.397 |
+| 2608.12493v1 — Beyond the Skew-Stickiness Ratio | transport geometry of spot-driven surface moves | 3 | 0.351 |
+| 2608.22478v1 — Latent-diffusion IV surface forecasting | 30-day surface scenarios vs a persistence benchmark | 3 | 0.132 |
+| 2408.08866v1 — High-Frequency Options Trading | Greek-ranked long/short legs + Markowitz weights | 2 | −0.430 |
+| 2608.22620v1 — WSVI shape family | W-shaped smiles, no-arbitrage structure (no empirics) | 3 | −1.42 |
+| 2603.29430v1 — Ultra-short-term volatility surfaces | Edgeworth++ pricer for 0–7 DTE SPX | 0 | — |
+| 2603.07600v5 — Differential ML for 0DTE | surrogate pricer + Greeks under Bates | 0 | — |
+
+The last two are pure pricing/calibration papers — no trading rule, no P&L, no returns — and were closed without a
+spec rather than dressed up as one.
+
+**Nothing cleared the noise floor, and nothing beat the incumbent.** Seventeen specs ran. The best,
+`shortdte_put_edge` (the paper's 25-delta short put at 1–3 DTE, gated at the incumbent's IV/RV ≥ 1.27), scores 0.428
+with mean Sharpe 0.616 — *below* the deployed +0.520, and its −0.30 Sharpe delta sits inside the 0.54 this sample
+resolves. Eight specs landed inside that noise band (deltas −0.07 to −0.31: `shortdte_put_edge`, `fearsort`, `prepay`,
+`trough_strike`, `atmcore`, `skewgate`, `lowbeta_tenor`, `theta_fly`). Nine were clearly worse:
+
+| spec | score | mean Sharpe | Δ Sharpe | trades |
+|---|---|---|---|---|
+| `wfly_noevent` — near-expiry ATM vol selling, ungated | −5.33 | −0.93 | −1.85 | 1752 |
+| `wfly_long` — long the paper's bimodal density | −3.16 | −0.77 | −1.69 | 149 |
+| `longdated` — incumbent relocated to 180 DTE | −2.39 | −0.84 | −1.76 | 44 |
+| `shortdte_put_midvix` — VIX 15–25 band only | −2.00 | −0.70 | −1.62 | 383 |
+| `wfly` — event-gated W-butterfly | −1.42 | 0.35 | −0.57 | 159 |
+| `shortdte_spread_edge` — 1–3 DTE 25/10Δ put vertical | −1.35 | −0.28 | −1.19 | 200 |
+| `stablecentre` — 40/25Δ at 180 DTE | −1.23 | −0.14 | −1.06 | 52 |
+| `shortdte_put` — ungated 25Δ short put, 1–3 DTE | −1.04 | 0.02 | −0.90 | 756 |
+| `theta_longshort` — put diagonal, 30/75 DTE | −0.73 | 0.12 | −0.80 | 75 |
+
+Three of those are confirmations rather than failures. The ungated 1–3 DTE short put reproduces the learning-to-rank
+paper's own internal baseline (its walk-forward Sharpe −0.019 against our 0.02): short-dated put writing pays only
+conditionally, the same story this document tells at 65 DTE. `wfly_long` is an inverse test and loses 1.69 Sharpe,
+confirming the implied earnings jump is on average over-priced, not under-priced. And skew, VIX-band, surface-region
+and Greek-rank conditioning all failed again, exactly as every prior non-IV/RV conditioning variable has — `skewgate`
+did not even move the metric its thesis targeted (drawdown 1.39%/2.14% against the incumbent's 1.36%/2.00%, having
+removed 30% of the trades).
+
+Two caveats against over-reading the losers. The 180-DTE specs are confounded: that tenor carries far more vega and
+far less theta per day than 65 DTE, so −0.84 and −0.14 are largely negative carry through 2022 rather than a clean
+refutation of the surface-persistence claim. And `prepay` (110 DTE) sits off the documented 55–70 DTE plateau, so its
+weak result is ambiguous between the paper's horizon and the known DTE hole.
+
+One paper's central *empirical* claim did replicate on our data even though it was not tradable: fitting σ(k) on the
+~30 DTE Kaggle slice and regressing Δσ_ATM on S_σ·Δlog F gives β̂ = 1.308 (SPY) and 1.234 (QQQ), R² 0.71, against the
+paper's 1.4375 on SPX. Super-skew is real here. It is a risk decomposition for a hedged book, not an entry signal.
+
+**Engine issues found (recorded, not fixed):**
+
+- **`vix_rank` has lookahead.** `data.vol_index()` computes `s.rank(pct=True)` over the entire 1990–2026 VIX series and
+  then reindexes onto backtest dates, so a 2020 date is ranked against the future. The practical effect is small — VIX's
+  unconditional distribution is stable — but it is a genuine bias. An expanding-window rank is the honest fix.
+- **`vix` is stored in decimals** (0.12–0.83), not index points, and `_in_range` treats an out-of-support gate as simply
+  never firing: a spec written as `vix: [15, 25]` backtested cleanly to 0 trades / score 0.0 with no error. A gate whose
+  range never intersects the feature's observed support should be rejected at validation.
+- **`min_credit` is unusable on any naked short leg** — `max_loss` for a short put is ~the strike, so credit/max_loss is
+  ~0.1% and any floor above zero silently blocks every entry.
+- **`max_loss` is wrong for multi-expiry structures.** Every leg is valued at expiry intrinsic on one spot grid, so a
+  `dte_offset` long leg's remaining time value is ignored and max loss is overstated; sizing then degenerates
+  (`theta_longshort` sized to exactly 1 contract on 40 of 40 SPY trades).
+- **Percent-of-premium exits are meaningless for premium-neutral structures.** That diagonal had median `|entry_value|`
+  $1.47 and a minimum of $0.018/share, so 34 of 40 exits tagged "profit" were noise against a tiny denominator.
+- `_pick_expiration` shifts the whole DTE window by each leg's offset, so a 3-tenor structure can silently pick the same
+  expiry twice; and the `min_volume` filter falls back to an empty frame when nothing on the target expiry clears it,
+  which is why the 180-DTE specs got 44–52 trades against the incumbent's 102 — close to the 40-trade scoring cliff.
+
+**Missing primitives worth building next, ranked by value over effort:**
+
+1. **Signal-conditional position size.** `risk_fraction` is a single constant. Every sizing rule the strongest paper
+   cares about (Edge Allocation on the training-CDF percentile of (IV−RV)/RV, short-richness scaling, fractional Kelly)
+   is size-as-a-function-of-a-feature. We already know the IV/RV gate is the entire edge; scaling size along it instead
+   of binarising it is the cheapest untested amplification of the one thing that works.
+2. **Expanding-window feature ranks, plus a unit/support check in `Spec.validate()`.** Half a day. Removes a real
+   lookahead bias and a whole class of silent zero-trade specs.
+3. **Per-contract gamma, vega and theta in `data.COLS`.** Three papers needed them and had to be proxied by strike and
+   DTE. Unlocks vega-neutral and theta-targeted structures and Greek-matched leg ratios; the Kaggle chains carry them.
+4. **A macro-event calendar (`days_to_event`: FOMC, CPI, NFP) mirroring `days_to_earnings`.** Earnings avoidance is the
+   single largest proven effect in this document (+0.99 on AAPL), and there is no index analogue — SPY/QQQ, the only
+   validated pair, currently cannot express the one filter that clearly works.
+5. **Cross-sectional candidate ranking**: score N candidate structures per day, take the argmax, allow an explicit SKIP.
+   This is the actual contribution of two of the papers, and it is the same primitive the breadth plan needs for the
+   1,522-name Dolt scan. Higher effort — it changes `Spec` from one fixed structure into a candidate set.
+6. **Per-slice smile fit in forward moneyness** — a forward `F`, a discount curve, and a curvature ("W-ness") feature.
+   Three papers are written entirely in `k = ln(K/F)`; the engine has strike/spot and two hardcoded surface probes.
+   Medium effort; unlocks strike selection by fitted-vs-quoted residual.
+7. **Short-horizon vol pair** (5-day RV, shortest-tenor ATM IV) to complement the 30-day `iv_rv_ratio`. Cheap, but note
+   the Dolt OOS surface has zero rows under 7 DTE, so short-tenor candidates could never be verified off-sample.
+8. **Intraday marks and a delta-hedging loop.** Required by four of the eight papers and by any transport or
+   hedged-book result — but it is a rewrite of the engine's core loop and the data does not exist here. Lowest priority.
+
+**Process notes.** `pypdf` was not installed and was added to the venv (no repo code touched). The session scratchpad is
+shared across concurrently running paper agents: two agents independently read back a *different* paper's text from a
+colliding `paper.txt`. Parallel paper runs must use unique scratchpad filenames and should check the PDF's `/Title`
+metadata before trusting extracted text.
+
+## arXiv intake, 2026-08-29
+
+The research loop read eight papers and produced 26 testable specs. **None beat the incumbent.** The best scored
++0.428 against the deployed +0.520, and every candidate above +0.28 sat inside the 0.54 noise floor. Recording it
+because a loop that only reports wins is not measuring anything.
+
+| paper | best derived spec | score | Sharpe | verdict |
+|---|---|---|---|---|
+| [2608.24786](https://arxiv.org/abs/2608.24786) Harvesting the Volatility Risk Premium (Wysocki) | short-dated put, IV/RV gated | +0.428 | 0.62 | within noise |
+| [2608.20020](https://arxiv.org/abs/2608.20020) The Reconfiguration Premium (Carvalho) | incumbent + `vix_rank >= 0.5` | +0.397 | 0.84 | within noise |
+| [2608.12493](https://arxiv.org/abs/2608.12493) Beyond the Skew-Stickiness Ratio (Che & Das) | strikes at the velocity trough | +0.351 | 0.78 | within noise |
+| [2608.20020](https://arxiv.org/abs/2608.20020) The Reconfiguration Premium | 110-DTE prepayment horizon | +0.334 | 0.85 | within noise |
+| [2608.22478](https://arxiv.org/abs/2608.22478) Arbitrage-Aware IV Surface Forecasting | ATM-core variant | +0.132 | 0.76 | worse |
+| [2608.22620](https://arxiv.org/abs/2608.22620) WSVI (Dimensionless Shape Family) | event butterfly | −1.42 | 0.35 | worse |
+| [2603.07600](https://arxiv.org/abs/2603.07600) Differential ML for 0DTE | — | — | — | not expressible |
+| [2603.29430](https://arxiv.org/abs/2603.29430) Ultra-short-term volatility surfaces | — | — | — | not expressible |
+| [2408.08866](https://arxiv.org/abs/2408.08866) High-Frequency Options Trading | — | — | — | not expressible |
+
+Seven of the eight were judged not expressible in this engine, for consistent reasons: they need intraday rebalancing,
+a dynamic delta hedge, cross-sectional ranking inside a chain, or a calibrated surface. Those are design boundaries,
+not oversights.
+
+Three things came out of it that are worth keeping.
+
+**Independent corroboration of the gate.** Wysocki's sizing variable, "Edge Allocation", is (IV − RV)/RV — the same
+quantity this project's entry gate uses, arrived at from a completely different direction (a LambdaRank ranker over
+0DTE SPXW puts). Two independent searches landing on the same conditioning variable is the strongest evidence so far
+that the gate is a real effect rather than a fit.
+
+**A new engine capability, and a negative result for it.** The most-cited missing primitive across the papers was
+signal-conditional position sizing — Wysocki sizes proportionally to the edge rather than gating on it. That is now
+implemented as `Spec.size_scale = [feature, lo, hi]`, scaling the risk budget from 0.5x to 1.5x across the feature's
+range. Tested faithfully, it does not help here:
+
+| sizing | score | change |
+|---|---|---|
+| flat 3% risk (incumbent) | +0.520 | — |
+| Edge Allocation on `iv_rv_ratio` 1.27→1.60 | +0.488 | −0.031 |
+| Edge Allocation on `iv_rv_ratio` 1.27→1.80 | +0.421 | −0.099 |
+| scaled on `vix_rv_ratio` 1.40→2.00 | +0.525 | +0.005 |
+
+The capability stays because it is correct and cheap; the deployed spec does not use it.
+
+**A ranked list of what to build next**, from the papers' own missing-primitive reports: cross-sectional ranking within
+a chain (named by two papers), per-contract greeks beyond delta (already in the data, still unused), forward moneyness
+`log(K/F)` rather than `strike/spot − 1`, and per-tenor ATM vol for maturities under 15 days.
+
+Every spec carries its origin in `Spec.source` as `arXiv:<id> <title>`, so any result stays traceable to the paper it
+came from. Papers already read are recorded in `docs/papers.jsonl`.
+
+## FOMC event risk: a paper-led hypothesis, rejected out of sample
+
+The largest effect measured anywhere in this project is earnings avoidance on single names (+0.99). Indices have no
+earnings, but they do have scheduled monetary policy. [arXiv:2608.10693](https://arxiv.org/abs/2608.10693), *When the
+Fed Speaks: Dynamics and Forecasts of the Volatility Surface*, states the mechanism directly: implied vol rises into
+scheduled FOMC meetings, most strongly for short-dated OTM options in high-volatility regimes. That predicts the
+earnings result should have an index analogue.
+
+FOMC statement dates were scraped from federalreserve.gov (`synthetix_alpha/data/fomc.py`, 95 dates 2016-2026,
+verified at exactly 8 per year except 2020's 7 after the cancelled March meeting) and added as `days_to_fomc`.
+
+In sample the hypothesis looked strong, and looked strong in the specific ways that are supposed to be convincing:
+
+| FOMC gate | score | mean Sharpe | min Sharpe |
+|---|---|---|---|
+| incumbent, no gate | +0.520 | 0.92 | 0.70 |
+| avoid entry within 7 days | +0.684 | 0.96 | 0.92 |
+| avoid entry within 14 days | **+1.015** | 1.09 | 1.00 |
+| only enter within 14 days (inverse) | −0.049 | 0.49 | 0.03 |
+
+Monotone in the gate width, a confirming inverse test, and fragility improving from a median of 0.43 to 0.92.
+
+**It failed out of sample and was rejected.** On the independent Dolt data the gated rule scores −0.287 with Sharpe
+0.433, against the ungated incumbent's +0.202 and Sharpe 0.67, and is positive in only 3 of 8 years.
+
+The likely reason is worth recording: the in-sample window, 2020-2022, contains the emergency cuts of the COVID crash
+and the fastest hiking cycle in forty years. FOMC meetings in that window were genuinely exceptional events; in the
+2023-2026 out-of-sample period they were not. The effect was regime-specific, and no amount of in-sample confirmation
+would have revealed that.
+
+`days_to_fomc` and the FOMC calendar stay in the codebase. The deployed rule does not use them.
+
+## Five paper ideas, tested and rejected
+
+The loop now triages candidates with an agent rather than keywords, judging each abstract against what the Spec DSL
+can actually express. Of 60 candidates drawn from a 165-paper pool, exactly one was both testable and structurally
+unexplored — which is itself the useful finding: most q-fin preprints need intraday data, dynamic hedging,
+cross-sectional ranking or surface calibration, none of which this engine has.
+
+| source | idea | outcome |
+|---|---|---|
+| [2608.24786](https://arxiv.org/abs/2608.24786) Wysocki | Edge Allocation: size proportional to (IV−RV)/RV | −0.03 to −0.10, rejected |
+| [2608.10693](https://arxiv.org/abs/2608.10693) When the Fed Speaks | avoid entry near scheduled FOMC | +0.50 in sample, **fails out of sample** (Sharpe 0.43 vs 0.67) |
+| [2608.12493](https://arxiv.org/abs/2608.12493) Che & Das | sell at the variance "velocity trough" | **claim refuted** — no trough at the predicted −4% |
+| [2608.20020](https://arxiv.org/abs/2608.20020) Carvalho | harvest concentrated at high VIX | within noise |
+| [1006.1882](https://arxiv.org/abs/1006.1882) Petersen et al. | Omori shock-clock: sell into post-shock vol decay | no usable gain; the promising window was small-sample noise |
+
+Two are worth spelling out because they show the verification actually biting.
+
+**The FOMC gate looked right in every way that is supposed to be convincing** — monotone in gate width, a confirming
+inverse test, fragility improving from 0.43 to 0.92 — and still failed out of sample. The in-sample window, 2020-2022,
+contains the COVID emergency cuts and the fastest hiking cycle in forty years, so FOMC meetings there were genuinely
+exceptional; in 2023-2026 they were not.
+
+**The Omori shock-clock is the cleanest small-sample trap in the project.** A 5-40 day post-shock entry window gave the
+highest mean Sharpe of anything tested, 1.05 against the incumbent's 0.92 — on 33 trades. Extended to five underlyings
+it collapses to 0.42 on 35 trades. The shock detector itself works: 14 volatility quakes on SPY over 2020-2022, and
+they are the recognisable ones (the COVID crash, GameStop, Omicron, Jackson Hole).
+
+Three capabilities came out of these tests and stay in the engine because they are correct and cheap, even though the
+deployed rule uses none of them: `size_scale` (signal-conditional sizing, from Wysocki), `days_to_fomc` (with a
+verified FOMC calendar, from When the Fed Speaks), and `days_since_shock` (from Petersen et al.).
+
+The honest conclusion after five faithful tests is unchanged from the power analysis: with about 37 independent
+holding periods this sample cannot resolve the size of effect these papers offer. The loop is working — it is
+rejecting things that deserve rejection. Finding a real attributable improvement needs more option-chain history far
+more than it needs more papers.
+
+## The improvement that did survive: combining sleeves
+
+After five paper ideas were rejected as signals, the one that worked was not a signal at all. The first paper
+synthesis flagged a missing primitive drawn from Lillo, Mazzarisi & Tsaknaki, *Tackling estimation risk in Kelly
+investing using options*, whose combination theorem needs a way to run several strategies as sleeves of one account
+and score the blend. That primitive did not exist, so the idea was never testable. It is now `backtest_combo`.
+
+Two sleeves had been validated separately and never run together:
+
+| | Sharpe | max drawdown |
+|---|---|---|
+| index sleeve (`put_vertical_ivrv`, SPY+QQQ) | 0.98 | — |
+| single-name sleeve (`put_vertical_singlename`, AAPL) | 0.88 | — |
+| **50/50 blend** | **1.15** | **−1.14%** |
+
+Measured on the 2020-2022 overlap only, so this is not an artifact of the sleeves covering different periods. Sleeve
+correlation is **0.335**.
+
+**Why this one is trustworthy where the signal tests were not.** The diversification identity predicts a blended
+Sharpe of `(0.5·0.98 + 0.5·0.88) / sqrt(0.5 + 0.5·0.335) = 1.138`. The measured value is 1.15 — a difference of 0.012.
+The gain is arithmetic, a consequence of combining two imperfectly correlated return streams, not an effect inferred
+from a small sample. That is why it does not have to clear the 0.54 noise floor: no new signal is being claimed. It is
+also flat in the weighting (1.13 / 1.15 / 1.14 at 40/50/60% index), so there is no knife-edge parameter.
+
+One implementation detail decided the result. Splitting $100k across sleeves made the blend look *worse* than either
+sleeve, because at $50k the integer contract rounding changes which trades happen at all. Sleeves must be run on full
+capital and combined at the **return** level. The first version got this wrong and reported a Sharpe of −0.01.
+
+Deployed as `strategies/portfolio.json`; run it with the same CLI as any spec.
+
+## A third sleeve, and why equal weight is the right call
+
+The combination primitive paid off twice. The gen-0 search had found a short call spread gated below the 200-day SMA
+that earned everything it earned in 2022 and was shelved for scoring poorly on its own (Sharpe 0.41). As a *sleeve*
+its standalone score is close to irrelevant; what matters is that it is **negatively correlated** with both put
+sleeves: −0.159 against the index sleeve and −0.244 against the single-name one.
+
+Measured on the 2020-2022 overlap where all three run:
+
+| portfolio | Sharpe | max drawdown |
+|---|---|---|
+| two sleeves, 50/50 | 1.146 | −1.14% |
+| **three sleeves, equal weight** | **1.340** | **−0.83%** |
+| three sleeves, inverse-vol | 1.347 | −0.88% |
+
+Higher Sharpe and a smaller drawdown. The theoretical blend from the covariance matrix is 1.340 against a measured
+1.340 — an exact match, so again this is arithmetic rather than a fitted effect.
+
+**Equal weight is deliberate.** The candidate weightings span 1.318 to 1.348, so the optimised inverse-vol weights beat
+naive equal weight by 0.007 of Sharpe, far less than the error in estimating the inputs. That is precisely the point of
+the paper the combination primitive came from — estimation risk in Kelly weighting — so the portfolio takes the naive
+weights and carries no fitted parameter.
+
+As deployed over the full period the portfolio has **Sharpe 0.975**, a **−2.12%** drawdown and **+14.3%** total
+return, positive in every year. The full-period figure is lower than the overlap figure because 2016-2019 has only the
+single-name sleeve running and therefore no diversification to collect.
+
+That paragraph originally read 1.109 and −0.83%, which was wrong. `backtest_combo` filled a sleeve's missing days with
+a 0% return, so a sleeve that did not exist yet was scored as one sitting flat in cash — it damped the blend's
+volatility without ever losing, flattering both the Sharpe and the drawdown of any portfolio whose sleeves had
+different histories. Weights are now renormalised each day onto the live sleeves. Every number measured *on the
+overlap* is unaffected, because all three sleeves are live there and the renormalisation is a no-op — the two identity
+checks above still hold. What changes is the full-period claim, and it changes twice: the three-sleeve portfolio adds
+roughly 0.001 of Sharpe over two sleeves on the full period rather than the 1.15 → 1.34 the overlap shows, because the
+bear-call sleeve only trades in a narrow window. The diversification is real where it is measured; it is only
+collected for part of the record.
+
+`strategies/portfolio.json`, three sleeves, equal weight.
+
+## Retesting the dismissed papers with the data that was already there
+
+Four ideas had been dismissed as "inside the noise" on a two-underlying sample that could only resolve a 0.54 Sharpe
+difference. That was the wrong instrument, not the wrong ideas: the DoltHub clone holds 1,522 names and only SPY had
+ever been used from it. Pulling 50 liquid names over 2019-2026 gives **7,395 trades across 48 usable names**, and a
+*paired* design — baseline and variant on the same name over the same period — removes the between-name variance that
+was swamping everything.
+
+| source | idea | mean ΔSharpe | t | win rate |
+|---|---|---|---|---|
+| [2608.12493](https://arxiv.org/abs/2608.12493) Che & Das | strikes by moneyness, not delta | **+0.582** | +7.39 | 88% |
+| [1006.1882](https://arxiv.org/abs/1006.1882) Petersen et al. | Omori 10-60 day post-shock window | +0.202 | +4.17 | 68% |
+| [2608.12493](https://arxiv.org/abs/2608.12493) Che & Das | skew ≤ 0.075 gate | +0.155 | +4.94 | 73% |
+| [2608.20020](https://arxiv.org/abs/2608.20020) Carvalho | `vix_rank ≥ 0.5` | +0.136 | +2.60 | 67% |
+| [2608.24786](https://arxiv.org/abs/2608.24786) Wysocki | Edge Allocation sizing | +0.012 | +0.35 | 54% |
+
+**Four of the five are real effects.** They were never disproved before; they were measured with an instrument too
+blunt to read them. Only Wysocki's sizing rule is genuinely null, and it stays rejected.
+
+Two things stop this becoming a deployment.
+
+**Significant is not profitable.** The baseline over this universe has a median Sharpe of −0.506 and is profitable on
+23% of names — single-name premium selling without an earnings filter simply loses. Only the moneyness variant crosses
+zero (median +0.038, profitable on 52%). Beating a losing baseline by a statistically certain margin still leaves you
+at break-even.
+
+**The effect is conditional, and my earlier refutation was on the wrong assets.** On Kaggle's fine grid the moneyness
+parameterisation *hurts* indices (SPY −0.234, QQQ −0.028) and *helps* single names (AAPL +0.221, TSLA +0.275, NVDA
++0.818). Fixed moneyness on a 60%-vol name sells a ~0.44-delta strike rather than 0.20, so it collects far more
+premium where vol is high. When I "refuted" the velocity trough earlier I tested it on SPY and QQQ — the two assets
+where it should not work. On single names the portfolio peaks at −4.0% forward moneyness, which is where Che & Das
+predict the trough at this tenor.
+
+Deploying it still failed, for a reason worth recording. Widening the single-name sleeve to AAPL+NVDA+TSLA with
+velocity-trough strikes lifts the blended Sharpe from 1.340 to **1.632** over the window where all three sleeves run —
+but nearly triples full-period drawdown, from −2.12% to −5.93%, because closer strikes collect more premium and lose
+more when they lose. The diversification masks that risk only while every sleeve is live. It is kept as
+`strategies/put_vertical_singlename_wide.json` and not deployed.
+
+Finding that comparison also exposed a bug in `backtest_combo`: sleeves with no data for a period were being filled
+with a 0% return, which reads as "flat" rather than "absent" and silently penalised any portfolio whose sleeves have
+different histories. Weights are now renormalised each day onto the sleeves that are actually live. Before the fix the
+widened portfolio looked better on the full period; after it, worse — the fix reversed the conclusion.
+
+## An intraday equity sleeve, because the options edge is too slow for a one-week window
+
+The options book is a high-Sharpe, low-return business: the deployed spread earns ~1%/yr, which over four and a half
+trading days is roughly $20 on $100k. Shortening DTE does not rescue it — a sweep from 65 down to 7 days trades more
+often but degrades, because the theta gained is paid for in gamma:
+
+| DTE | Sharpe | trades | return/yr | max DD |
+|---|---|---|---|---|
+| 65 (deployed) | 0.92 | 102 | 0.9% | −2.0% |
+| 10 | 0.63 | 304 | 1.4% | −6.0% |
+| 7 | 0.36 | 316 | 0.8% | −10.0% |
+
+So a second sleeve was tested on 5 years of Alpaca daily bars over 50 liquid names. Two ideas, one dead:
+
+**Short-term reversal does not work here.** Long past losers / short past winners returns −0.7% to −5.4%/yr at every
+lookback from 1 to 5 days. Rejected. The first version of this test reported Sharpe −42 with a 0% win rate, which is
+not a result but a bug: shifting the *aggregated* return series only relabels the index, so the ranking was still being
+scored against the same day's return it was computed from. Shifting the selection masks instead gives the numbers above.
+
+**Overnight gap fade does work.** Buying the ten largest overnight gap-downs at the open and flattening at the close:
+
+| variant | ann. return | Sharpe | win rate |
+|---|---|---|---|
+| long 10 gap-downs, open→close | **16.2%** | **0.86** | 52% |
+| long gap-downs, short SPY (beta stripped) | 10.5% | **0.91** | 51% |
+| equal-weight benchmark (all 50 names, open→close) | 8.7% | 0.59 | 52% |
+
+Profitable in 5 of 6 years. Two things keep this honest. The excess over simply being long open-to-close is +7.4%/yr
+with **t = 1.53** — suggestive, not significant, so most of the raw Sharpe is beta rather than alpha. And it is
+cost-sensitive: +11.2%/yr net of 2bps round-trip, +3.6% at 5bps, and **−9.0% at 10bps**.
+
+The effect is also not what intuition suggests. Requiring *larger* gaps destroys it monotonically (−0.5%: 0.53 Sharpe,
+−1%: 0.16, −2%: −0.48, −3%: −0.72). Big gaps carry news and continue; this is a mild cross-sectional tilt, not a panic
+fade. Basket size is a plateau rather than a peak (10–20 names all score 0.77–0.86), so no single parameter is load-bearing.
+
+Execution matches the backtest closely: entry is a market order once the opening prints are in, and the exit is a
+market-on-close order submitted at the same time, so it fills at the official close the backtest measures and the
+sleeve cannot hold overnight. `synthetix_alpha/live/intraday.py`, run from `live/run.py`.
+
+Also fixed here: `backtest_combo` filled a missing sleeve's days with a 0% return — see the correction above.
+
+## The options sleeve was never a 1%/yr strategy, it was running at 5% of capacity
+
+An earlier note in this document reported the options book earning "~1%/yr". That figure was wrong twice over.
+
+First, arithmetic: the sweep that produced it divided total return by a hardcoded six years, but SPY's chain data
+covers three. The deployed spec's real figure was **2.13% CAGR at Sharpe 0.92**.
+
+Second, and more important, that number described the *deployment*, not the edge. Trade-level detail shows why:
+
+| | value |
+|---|---|
+| contracts per trade | **1.03** (median 1, max 2) |
+| trades per year | 20.9 |
+| average P&L per trade | $129 |
+| gate fires | 24.8% of days |
+| average concurrent positions | **2.33 of 5 slots** |
+
+Sizing risks 3% of $100k = $3,000 while a single SPY put spread's max loss is ~$2,500, so the position size is
+quantised to one contract and roughly 93% of the account sits idle. Scaling deployment holds Sharpe almost flat while
+return moves by a factor of twenty:
+
+| config | CAGR | Sharpe | max DD |
+|---|---|---|---|
+| 5 slots, 3%, entry every 3d (old) | 2.13% | 0.92 | −2.0% |
+| 24 slots, 3%, entry every 3d | 3.51% | 0.99 | −2.8% |
+| 24 slots, 3%, **entry daily** | 7.92% | 1.02 | −5.8% |
+| 24 slots, daily, 5% | 16.60% | 1.08 | −11.0% |
+| 24 slots, daily, 10% | 40.50% | 1.12 | −25.7% |
+
+A flat Sharpe across a twentyfold change in return is the signature of an under-deployed strategy rather than a weak
+one. The binding constraint was `entry_every_days: 3`, not the slot count.
+
+**Deployed: 12 slots, 3% per position, daily entry** — 36% total risk, the same bound as before, for
+**5.11% CAGR at Sharpe 1.05**, worst year −0.94%, max drawdown −3.07%. Better than the old config on every axis.
+
+The quantisation also runs the other way, which caught a live bug. Per-position risk had been capped at 1.5% in
+`config/governance.yaml` on the reasoning that smaller positions are safer. They are not: at 1.5% the budget cannot
+afford one contract of a typical spread, the contract count rounds to zero, and only the cheapest spreads trade. That
+biased subset turns **+5.11% CAGR into −0.45%**. The floor is now recorded in the config so it is not lowered again.
+
+## Intraday equity ideas: two rejected, one kept
+
+Tested on Alpaca minute bars, 34 liquid names.
+
+**Cross-sectional short-term reversal** (long past losers, short winners, 1-5 day lookbacks): −0.7% to −5.4%/yr.
+Rejected.
+
+**Intraday momentum** (long the biggest first-30-minute winners, short the losers, held 10:00 to the close) looked
+excellent on 171 sessions: +16.9%/yr at Sharpe 1.59. Extending to 275 sessions cut it to **+7.6%/yr at Sharpe 0.78,
+t = 0.81**, with quarterly returns swinging −19%, +2%, +49%, −17%, +21% — one quarter carried the entire result — and
+it turns negative at 2bps per side against daily full turnover. Rejected. Worth recording as a case where a short
+sample produced a Sharpe that did not survive its own extension.
+
+**Overnight gap fade** survives and is deployed: 1,253 sessions rather than 171, and the detail is in the section above.
+
+It also improved. Ranking the gap in units of each name's own 20-day volatility, rather than raw percent, is the
+single change that takes the excess return over an equal-weight benchmark from insignificant to significant. On 80
+liquid names over 1,234 sessions:
+
+| ranking | basket | ann. return | Sharpe | t (excess) |
+|---|---|---|---|---|
+| raw gap | 10 | 14.60% | 0.72 | 1.05 |
+| raw gap | 20 | 15.57% | 0.91 | 1.76 |
+| **volatility-adjusted** | **5** | **25.88%** | **1.32** | **2.46** |
+| volatility-adjusted | 10 | 21.32% | 1.27 | 2.44 |
+| volatility-adjusted | 20 | 17.04% | 1.13 | 2.23 |
+
+A 2% gap on a calm utility is a far larger shock than a 2% gap on a semiconductor, and the raw ranking could not
+tell them apart. Sharpe is a plateau across basket sizes rather than a spike, positive in 5 of the 6 years, and it
+survives realistic costs — 20.8%/yr at 2bps and 13.3% at 5bps per round trip, breaking even near 10bps. Deployed at
+n=10 for diversification, since 1.27 against 1.32 is well inside noise.
+
+Filtering out the most extreme volatility-adjusted gaps *hurts* (21.3% down to 15-17%), which is the opposite of what
+raw-percent thresholds showed. Once the gap is scaled by the name's own volatility, the large readings are no longer
+predominantly news.
+
+## Crypto wallet copy-trading: blocked on data, and the first evidence is discouraging
+
+Two APIs were wired and tested. Bitquery works but the available token is realtime-only — `archive` and `combined`
+return 403, and the realtime dataset retains hours, so wallet skill cannot be measured from history. Birdeye reaches
+its price, token-trade and trader-ranking endpoints, but `/v1/wallet/tx_list` returns 401 on this tier and
+`/defi/txs/token` is capped at offset 10,000, which for TRUMP is about two hours.
+
+What the rankings do show is not encouraging. Comparing the top 600 Solana traders by PnL on two *disjoint*
+consecutive days, only **16 wallets (3%) appear in both**. An earlier comparison of the 30d and 1W rankings showed a
+rank correlation of +0.966, but that is an artifact: the 1W window sits inside the 30d window, so it correlates a
+number with itself. The rankings are also dominated by *unrealised* PnL — entries with `realized_pnl: 0` against tens
+of millions unrealised — so they measure who holds a token that pumped, not who trades well.
+
+Not deployed. A fair persistence test needs realised-PnL rankings over disjoint multi-day windows, or raw wallet
+history from a tier that permits it.
+
+### What the gap-fade sleeve should be expected to earn now
+
+Two checks were run before trusting the deployed number.
+
+**Execution fidelity.** The backtest buys at the official open, but live the sleeve ranks on the opening print and
+sends a market order seconds later. Measured on minute bars, that delay does not cost anything — entering at 09:31
+scored **+4.6%/yr better** than the open itself, with 09:35 and 09:45 similar, and only from 10:00 onward does the
+edge fade. The opening auction price is often an overshoot that partly reverts in the first minute, so the live
+entry is, if anything, slightly favoured. Exiting market-on-close remains the right choice.
+
+**Recent regime.** The headline Sharpe of 1.27 is a five-year figure, and the trailing year is materially weaker:
+
+| universe | period | ann. return | Sharpe |
+|---|---|---|---|
+| 34 names | trailing year | 3.11% | 0.21 |
+| 34 names | 5 years | 18.85% | 1.06 |
+| 80 names | trailing year | 7.09% | 0.44 |
+| 80 names | 5 years | **21.32%** | **1.27** |
+
+Universe breadth accounts for part of the gap — ten names chosen from eighty is a more selective basket than ten from
+thirty-four, and it helps in both periods — but the period accounts for more. This is inside the strategy's historical
+year-to-year variation rather than clear decay: 2024 returned 8.6% and 2026 8.4%, while 2022, 2023 and 2025 carried
+the average. It does mean the honest expectation for any given week is closer to the 0.44 regime than the 1.27
+headline, and the deployed size is set with that in mind rather than the five-year figure.
+
+### Crypto, systematically: nothing that beats noise except beta
+
+With copy-trading blocked on data, the tradeable Alpaca crypto universe was tested directly on three years of daily
+bars across 21 pairs.
+
+| strategy | ann. return | Sharpe | t |
+|---|---|---|---|
+| cross-sectional momentum, 14d (best of 5 lookbacks) | 11.40% | 0.54 | 0.93 |
+| cross-sectional reversal, 3d | 3.88% | 0.19 | 0.33 |
+| equal-weight buy and hold | 27.06% | 0.39 | 0.68 |
+| BTC buy and hold | 47.45% | 1.01 | 1.75 |
+| **BTC, long only above its 50-day average** | 45.91% | **1.37** | 2.37 |
+
+No cross-sectional alpha: the best momentum lookback reaches t = 0.93 and reversal is negative. The trend filter on
+BTC is the one line with signal, holding return roughly constant while halving both exposure (55%) and drawdown
+(−26% against −53%). Two caveats keep it out of the deployed set for now. The moving-average length is swept and
+**peaks rather than plateaus** — 20 days gives Sharpe 1.02, 50 gives 1.37, 100 gives 0.82 — which is the shape of a
+fitted parameter. And three years of BTC is largely one bull market, so "hold the asset but sit out the worst
+drawdowns" is a risk-reduction result on a beta position, not evidence of edge.
+
+### Do high-win-rate wallets keep winning? One Sunday says 87%, which is not enough to know
+
+**Read this section as a single observation, not a result.** Every number below comes from one pair of disjoint
+six-hour windows measured on Sunday 2026-08-30: wallets ranked over `now-12h to now-6h`, scored over `now-6h to now`.
+Bitquery's realtime dataset retains only a few hours, so exactly one such pair exists at any moment, and the free
+tier's quota was exhausted before a second could be gathered on a later day. Elsewhere in this document an effect is
+rejected at t = 0.81 on 275 sessions; nothing here meets that standard, in either direction. The cost arithmetic is
+solid, since fee schedules and live spreads are facts rather than estimates, but every signal figure rests on twelve
+hours of weekend flow.
+
+The premise is testable without historical archives. Bitquery's realtime dataset serves windows ending up to roughly
+six hours ago, which is enough for two **disjoint** six-hour windows: rank wallets on A, score them on B.
+
+The first pass ranked by net USD extracted (`sold_usd - bought_usd`) and looked strong — winners in A came back
+positive in B 74-85% of the time against a 54-68% base rate. That result is not trustworthy on its own. Net flow is
+autocorrelated by construction: a wallet steadily distributing a position shows positive net USD in every window
+simply because it keeps selling. The largest wallet by net flow extracted $1.16M while its **average sell price sat
+0.08% below its average buy price** — mechanically distributing, not trading well.
+
+Re-running on a metric that cannot be faked that way — average sell price divided by average buy price, so a wallet
+only scores if it sold higher than it bought — the persistence survives:
+
+| token | positive edge in A, then positive in B | base rate | lift | rank corr |
+|---|---|---|---|---|
+| TRUMP | **87%** | 77% | +10pp | +0.50 |
+| WIF | **88%** | 71% | +17pp | +0.46 |
+| BONK | **87%** | 71% | +16pp | +0.38 |
+
+It cuts both ways — wallets with negative edge in A come back positive only 41-48% of the time — and it holds for
+low-frequency wallets (rank correlation +0.56, +0.41, +0.53) at least as strongly as for high-frequency ones, so it is
+not purely a market-making artifact.
+
+**So the premise holds, and the strategy still fails, on execution economics rather than on persistence.** The median
+persistent edge is 0.22% to 0.44% per round trip. That is spread capture, earned by *providing* liquidity. Copying it
+through Alpaca means *taking* liquidity:
+
+| token | Alpaca round-trip spread | wallet edge | ratio |
+|---|---|---|---|
+| TRUMP | 0.59% | 0.44% | 1.3x |
+| WIF | 0.66% | 0.27% | 2.4x |
+| BONK | 2.02% | 0.26% | 7.8x |
+
+The cost of copying exceeds the entire edge being copied, on every token, before any latency. A copier is the
+counterparty to the very spread these wallets earn.
+
+The finding does point somewhere. Alpaca's majors are far cheaper to trade — SOL round-trips at 0.15%, ETH and BTC at
+0.06-0.07% — so a wallet with genuine *directional* edge held over days, rather than scalping edge held over minutes,
+could clear those costs comfortably. Measuring that needs holding periods longer than the six hours this data
+retains, which is the specific thing a Flipside or Dune export would unlock.
+
+**How long does it last?** Twenty-one snapshots collected half-hourly give a decay curve that a single pair of live
+queries cannot. Rank correlation of wallet performance against the gap between snapshots:
+
+| gap | TRUMP | WIF | BONK |
+|---|---|---|---|
+| 0.5h | 0.91 | 0.96 | 0.95 |
+| 2h | 0.80 | 0.89 | 0.83 |
+| 4h | 0.64 | 0.75 | 0.60 |
+| **6h (disjoint)** | **0.42** | **0.41** | **0.19** |
+| 8h | 0.33 | 0.35 | 0.23 |
+| 9h | 0.43 | 0.27 | 0.21 |
+
+Everything below six hours is inflated by overlap between the trailing windows. The result that matters is that once
+the windows are disjoint the correlation **plateaus rather than decaying to zero**, holding around 0.2-0.4 out to nine
+hours, which independently corroborates the +0.38 to +0.50 measured on price edge through a different data path.
+
+These snapshots recorded `net_usd` only: the collector process had imported the module before the price-edge columns
+were added, so nine hours of data sit on the confounded metric. It now records `edge` and also tracks SOL, whose
+0.15% Alpaca round-trip is the one cost structure where a copied edge could survive.
+
+## Running the options and gap-fade sleeves together
+
+The two deployed sleeves had never been measured against each other. They should diversify well by construction: one
+sells volatility over weeks, the other is flat by every close. Over the 313 days where both have data
+(2021-09 to 2022-12, the limit being Kaggle's option chains):
+
+| | Sharpe | ann. return | max drawdown |
+|---|---|---|---|
+| options sleeve alone | 0.95 | — | — |
+| gap fade alone | 1.27 | — | — |
+| 25% options / 75% gap fade | 1.31 | **19.52%** | −8.89% |
+| 50 / 50 | 1.37 | 14.41% | −6.13% |
+| 75% options / 25% gap fade | **1.41** | 9.30% | −3.31% |
+
+Correlation is **+0.279**, and every blend beats both standalone sleeves. As with the earlier sleeve combinations,
+this is arithmetic rather than inference: the diversification identity predicts a 50/50 Sharpe of 1.39 against a
+measured 1.37, a difference of 0.018, so it carries no burden of clearing the 0.54 noise floor.
+
+Sharpe rises monotonically toward the options-heavy end while return falls, so the weight is a risk preference rather
+than an optimum to be solved for. The live runner already holds both — roughly 36% of NAV at risk in defined-risk
+spreads and 40% of NAV in intraday notional that is flat overnight — which sits near the middle of that table.
+
+The estimate rests on one regime. The overlap is a single bear-market stretch, and correlations between a
+short-volatility book and an intraday equity book are exactly the kind that rise in a crash.
+
+## Why every crypto strategy tested dies in the same place
+
+If the persistent on-chain wallets earn their money as makers, the obvious question is why not make markets too. The
+answer is the fee schedule. Alpaca charges **0.15% maker with no rebate** at the entry volume tier, so capturing a
+spread costs 0.30% in fees:
+
+| pair | spread | 2x maker fee | net |
+|---|---|---|---|
+| BTC, ETH | 0.03% | 0.30% | −0.27% |
+| SOL | 0.08% | 0.30% | −0.22% |
+| TRUMP | 0.29% | 0.30% | −0.01% |
+| BONK | 1.01% | 0.30% | +0.71% |
+
+Fees exceed the entire spread on every liquid pair, before adverse selection — which is the actual cost of making,
+since a resting quote fills precisely when the price is about to move through it. Only BONK shows positive, and only
+because it is illiquid enough that the fills would be overwhelmingly informed.
+
+Seven approaches have now been tested and none clears the bar:
+
+| approach | result |
+|---|---|
+| wallet copy-trading | persistence real (87%) but edge 22-44bps against 59-202bps cost |
+| market making | 30bps of fees against 3-33bps of spread |
+| cross-sectional momentum (daily) | t = 0.93 |
+| cross-sectional reversal (daily) | negative at every lookback |
+| trend following | mean Sharpe 0.44 across 9 assets, exactly equal to buy-and-hold |
+| hourly cross-sectional momentum | gross 38-53%/yr, but turnover of 1.4 per rebalance costs ~51%/yr |
+| threshold dip-buying | best t = 2.08, chosen from 18 configurations, on 50 trades |
+
+The common cause is turnover priced at 15-25bps a side. The hourly momentum result makes it clearest: gross returns
+of 38-53% a year are genuinely there, and rotating a three-asset basket every 24-72 hours hands all of it to fees.
+
+Two of these deserve a note on method. The trend-following result was found first on BTC alone at Sharpe 1.37 with a
+swept moving-average length that peaked rather than plateaued; testing the same rule across nine assets brought the
+mean to 0.44, equal to buy-and-hold, with LTC at −0.61. Cross-asset validation caught what parameter-sweeping on one
+asset would have shipped. The dip-buying result first appeared with t-statistics between 100 and 180, which are not
+findings but a symptom of overlapping observations — slow-moving signals sampled hourly against 24-hour forward
+windows, across assets that move together. Re-run as a portfolio with non-overlapping holds, the same configuration
+gives t = 2.08.
+
+Intraday crypto is not inherently unprofitable; it is unprofitable *for us*, because the patterns live at horizons
+where 30-50bps of round-trip cost consumes the move. Changing that answer needs a lower fee tier (maker falls to
+0.08% above $1M of 30-day volume) or an edge large enough that 50bps is noise. Nothing here is deployed.
+
+### The one crypto signal that survives: extreme dislocations, rarely
+
+Everything that failed above failed on turnover. The obvious response is to trade far less often and only on much
+larger moves, so the same 30-50bps of cost is spread over a bigger expected gain. Buying pairs whose 24-hour move is
+an extreme multiple of their own hourly volatility, and holding a fixed 24-48 hours, does that. Pooled across 15
+pairs over 719 days, with costs charged as each pair's live spread plus 0.30% of fees:
+
+| z threshold | hold | trades | per year | mean | win | ann | max DD | t | first half | second half |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 2.5 | 48h | 144 | 73 | +0.25% | 51% | 5.2% | −21.2% | 0.58 | +0.90% | −0.40% |
+| 3.0 | 48h | 68 | 35 | +0.56% | 53% | 6.0% | −12.2% | 0.83 | −0.14% | +1.25% |
+| **3.5** | **48h** | **32** | **16** | **+3.82%** | **59%** | **22.2%** | **−6.5%** | **2.85** | **+4.64%** | **+3.01%** |
+| 3.5 | 24h | 32 | 16 | +4.90% | 66% | 29.3% | −3.4% | 3.29 | +8.09% | +1.70% |
+
+The effect strengthens monotonically with the threshold, which is the opposite of the raw-percentage gap thresholds in
+equities and consistent with the cost argument: only moves large enough to dwarf the fee are worth taking. It also
+appeared independently in two universes before being pooled — majors at t = 1.88 and memecoins at t = 2.67 on the same
+pre-specified configuration, the cross-asset check that trend following failed. Both halves of the sample are positive
+for the 48-hour hold, which is why that is the deployed variant rather than the higher-scoring 24-hour one whose
+result is front-loaded.
+
+What it is not: with 32 trades it is a thin sample, and 3.5 was chosen after testing 2.5 and 3.0. At roughly sixteen
+signals a year the expected number of trades in any given week is about 0.3, so this contributes nothing on most
+weeks and occasionally contributes a lot. It is deployed as an opportunistic sleeve at 15% of NAV in
+`synthetix_alpha/live/crypto.py`, sized on the assumption that it is real but rare, and it is currently silent — the
+most dislocated pair sits at z = −0.68.
+
+## Higher frequency: breadth, not a new signal
+
+The obvious route to more trades is a faster signal, so that was tried first and failed. Buying volatility-adjusted
+dips *within* the session on a 5-minute grid, at 15-60 minute lookbacks and 30-120 minute holds, returns about
+**0.4 basis points per trade gross** — indistinguishable from zero before any cost. The gap-fade effect does not
+generalise to intraday dips; it belongs to the overnight gap specifically, which is consistent with the earlier
+finding that entries after 10:00 stopped working.
+
+Breadth turned out to be the better lever. Running the same daily signal over ~200 liquid names instead of 80:
+
+| basket | fills/day | ann. return | Sharpe | excess | t |
+|---|---|---|---|---|---|
+| 10 of 80 (previous) | 20 | 21.3% | 1.27 | +12.3% | 2.44 |
+| 10 of 198 | 20 | 46.4% | **2.61** | +39.5% | 6.47 |
+| **20 of 198** | **40** | **31.9%** | **2.11** | **+25.0%** | **5.63** |
+| 30 of 198 | 60 | 26.0% | 1.81 | +19.0% | 5.33 |
+| 50 of 198 | 100 | 20.6% | 1.51 | +13.6% | 4.85 |
+
+Choosing the twenty most dislocated names from two hundred is a far more selective cut than choosing ten from eighty,
+and the effect is not only breadth: the 116 added mid-caps score Sharpe 2.60 on their own against 1.27 for the
+megacap core. That ordering is economically sensible, since megacaps are the most heavily arbitraged names on the
+exchange and have the least overnight noise left to revert.
+
+**On survivorship**, which a dip-buying result deserves scepticism about. The universe is today's large and mid caps,
+so names that were delisted or fell out of the index are missing, and that bias flatters a strategy which buys
+declines. Two things limit the damage. The excess return is measured against an equal-weight portfolio of the *same*
+names, so the bias sits on both sides of the subtraction. And the excess is positive in every one of six years,
+including **+30.2% in 2022** — a bear market, which is where a recovery bias would be expected to show up as weakness
+rather than as the second-best year. The absolute Sharpe of 2.11 should still be read as an upper bound.
+
+Costs bind before the signal does: 24.4%/yr at 3bps per round trip, 19.3% at 5bps, 6.7% at 10bps, negative beyond 15.
+S&P large and mid caps round-trip inside 5bps on market orders, so the deployed configuration has roughly a threefold
+margin, but it is the constraint worth watching if the universe is widened further into smaller names.
+
+Deployed at n=20: **40 fills a day**, 20 market-order buys at the open and 20 market-on-close exits.
+
+### Execution hardening the higher-frequency sleeve needed
+
+Forty fills a day exposes mechanics that twenty did not, and three defects were found by inspection rather than by
+the tests, which had passed throughout.
+
+**The exit was submitted before the entry filled.** `enter` sent the market buy and then immediately sent the
+market-on-close sell. The API returns on acceptance, not on fill, so the sell could arrive before the position
+existed, and a partially filled buy would have left the account short into the close. The exit now waits for the
+fill and is sized to `filled_qty` rather than to the requested quantity.
+
+**A pre-open run would have traded the previous session.** `rank_today` ranked whatever the newest bar happened to
+be. Run before the opening print — or on a weekend — the newest bar is the prior session, whose gaps have already
+been traded away. Running it on the Sunday produced a full twenty-name book against Friday's data, the largest
+position being PayPal on a −12.6% gap that had already closed out. The function now refuses any session that is not
+today in New York.
+
+**Neither showed up in testing** because the fixtures were dated in the past and dry-run never exercised the fill
+path. The fixtures now end on the current date, so the freshness guard is exercised the way live runs it.
+
+**The wallet collector was stopped**, for an arithmetic reason rather than an empirical one. It was accumulating
+price-edge data on SOL, the one token whose Alpaca costs looked survivable. But SOL round-trips at 0.08% of spread
+plus 0.30% of fees, and the persistent wallet edges measured 0.22-0.44%. A perfect result lands at break-even, so no
+amount of further collection can change the conclusion. The snapshots already gathered stay in `datasets/wallets/`
+and the decay curve they produced is recorded above.
+
+### What the single-sample problem actually leaves undecided
+
+Selecting harder does raise the measured edge, and an earlier version of this document was wrong to dismiss copying on
+the *median* edge across persistent wallets. Bucketed by past edge on that one Sunday:
+
+| selection | n | median past edge | forward edge |
+|---|---|---|---|
+| all two-sided wallets | 219 | 0.27% | 0.37% |
+| top 25% | 54 | 1.20% | 0.66% |
+| top 10% | 21 | 2.44% | **1.18%** |
+
+Regression to the mean is severe — the top decile keeps 48% of its edge — but 1.18% against SOL's 0.38% round-trip
+cost is a threefold margin, not an insufficient one.
+
+What closes the gap is that only the *directional* component is copyable; the rest is maker spread capture earned at
+prices we cannot reach. Measured against a random-timestamp baseline, TRUMP shows a real directional excess of +0.21%
+at five minutes and +0.32% at fifteen, against a 0.89% cost. SOL shows **none**: its raw forward returns look strongly
+predictive (t up to 25) purely because SOL drifted +1.78% through the window, and against random timestamps the excess
+is −0.08% to −0.18%. Drift, not skill. That correction matters more than the headline, because the uncontrolled
+version is exactly the kind of number that would have justified deploying capital.
+
+So the two tokens fail for opposite reasons: the one with tight spreads has no signal, and the one with signal has
+wide spreads. That anti-correlation is plausible rather than accidental, since the same inefficiency shows up as both.
+But plausible is not demonstrated. Establishing it needs repeated window pairs across many days, which requires
+Bitquery archive access, a Flipside or Dune export, or weeks of forward collection. Until then this is an open
+question, not a closed one.
+
+## Stock splits were silently freezing marks
+
+Kaggle chains are not split adjusted, and the engine did nothing about it. `yf.spans_split` existed for exactly
+this purpose and was never called from anywhere in the engine.
+
+The failure was quiet rather than loud. `_mark` looks a contract up in the day's chain; after a split the old
+strikes are gone, and with no explicit fallback the leg simply keeps its last mark. An AAPL spread opened
+2020-08-28 at strikes 435/395 held through the 4:1 split on 2020-08-31, and from that day was valued at a
+pre-split price for the remaining month of its life, closing for a reported **-$17**.
+
+Positions are now adjusted the way OCC adjusts them: contracts multiply by the ratio, while strike, mark and the
+per-share entry value divide by it, and the OCC symbol is rebuilt. The adjusted contracts do exist in the data
+(`AAPL201016P00108750` quotes at 3.18 on the exit date), so marking resumes normally. The same trade now runs as
+four contracts at 108.75/98.75 and closes at **-$357**, which is what a 12% split-adjusted fall in the underlying
+actually cost.
+
+Six trades out of 260 spanned a split. Isolating the fix with identical specs on both sides:
+
+| strategy | Sharpe, splits ignored | Sharpe, adjusted | delta |
+|---|---|---|---|
+| put_vertical_singlename | 0.817 | 0.807 | −0.010 |
+| put_vertical_singlename_wide | 0.756 | **0.853** | **+0.098** |
+| the other nine specs | unchanged | unchanged | 0.000 |
+
+The correction runs in both directions, which is worth noting: stale marks were understating a loss on AAPL and
+overstating losses on NVDA. Only single names are affected at all, since SPY and QQQ have never split.
+
+One attribution error is worth recording. The deployed single-name sleeve moved from 0.900 to 0.807 across this
+work, and the first reading of that blamed the split fix. It did not: 0.900 predated the switch to daily entry with
+twelve slots, and re-benchmarking with identical specs on both sides shows the split fix accounts for −0.010 of it.
+The remaining −0.083 is the deployment change. Comparing against a number measured under different settings is how
+a small correction gets mistaken for a large one.
+
+**Deployed portfolio, re-benchmarked:** Sharpe 0.870, max drawdown −5.03%, total return +31.95% over 453 trades.
+
+## Optimal weights, computed: the optimiser loses to equal weight
+
+The allocation question was put to five schemes over the daily returns of the deployed sleeves: equal weight,
+inverse volatility, minimum variance, and the tangency portfolio both unconstrained and long only. In sample the
+ranking is what theory predicts. Out of sample, on a walk-forward that fits weights on everything up to a date and
+trades the next sixty days, it inverts:
+
+| scheme | in-sample Sharpe | out-of-sample Sharpe | OOS return |
+|---|---|---|---|
+| **equal weight** | 1.29 (worst) | **1.56 (best)** | **4.1%** |
+| minimum variance | 1.12 | 1.44 | 5.1% |
+| tangency, long only | 1.34 | 1.42 | 5.2% |
+| tangency | 1.34 | 1.41 | 5.2% |
+| inverse volatility | 1.34 | 0.69 (worst) | 1.7% |
+
+On the wider five-sleeve set the same pattern is sharper still: tangency reaches 4.38 in sample and 1.18 out,
+while equal weight goes 2.56 in and 1.42 out. Fitting more parameters buys in-sample Sharpe and sells the
+out-of-sample kind.
+
+**The differences are not significant, and that is the point.** Over 2.14 years of test data the standard error of
+a Sharpe estimate is 1.02, and the spread between best and worst scheme is 0.71, or 0.69 standard errors. No scheme
+is measurably better than any other. Equal weight is chosen because it ties on evidence and has no parameters to
+estimate, so it cannot degrade the way a fitted allocation does.
+
+The same discipline applies to the sleeve budget. Optimising the gap fade budget on the overlap picks 15%, and a
+walk-forward shows why that is worthless: the fitted budget swings between 10% and 25% depending on the window, and
+delivers a mean out-of-sample Sharpe of **0.56 against 0.92 for a fixed 40% that was never fitted at all**. The
+in-sample optimum sits low only because gap fade returned Sharpe 1.20 in that particular window against 1.61 over
+its full history. The optimiser was fitting an accident of the sample.
+
+### What the budget actually buys
+
+Levering one sleeve does not change its Sharpe, since return and volatility scale together. Standalone, gap fade
+prices identically at every size:
+
+| budget | total P&L | CAGR | Sharpe | max DD | worst day |
+|---|---|---|---|---|---|
+| 40% | +$59,685 | 10.0% | 1.61 | −5.0% | −1.45% |
+| 50% | +$79,002 | 12.6% | 1.61 | −6.2% | −1.81% |
+| 60% | +$100,432 | 15.3% | 1.61 | −7.4% | −2.17% |
+| 70% | +$124,176 | 17.9% | 1.61 | −8.6% | −2.53% |
+
+Inside the book it does change, because the options sleeves are held fixed while only gap fade is levered, and the
+two correlate at just **+0.163**:
+
+| gap fade budget | book P&L | CAGR | Sharpe | max DD |
+|---|---|---|---|---|
+| 0% | +$4,518 | 3.6% | 1.33 | −1.7% |
+| **40%** | +$15,879 | 12.6% | **1.51** | −5.8% |
+| 50% | +$18,789 | 14.9% | 1.47 | −7.0% |
+| 60% | +$21,725 | 17.1% | 1.44 | −8.2% |
+| 70% | +$24,684 | 19.4% | 1.41 | −9.4% |
+
+Adding gap fade at all is worth +0.18 of book Sharpe, which is the diversification the low correlation implies.
+Beyond that the curve is a straight risk-for-return trade: 70% earns 55% more than 40% and draws down 62% deeper.
+That is a risk appetite decision, not something a backtest can settle, and the honest reading of the walk-forward is
+that any fixed choice in this range beats trying to time it.
+
+Reproduce with `python -m synthetix_alpha.strategy.allocate weights` and `... budget`.
+
+## Nothing else is worth adding, and trade count is bought with return
+
+Gap fade is deployed at **60% of NAV**. Every remaining spec was then tested as a fourth options sleeve on top of
+the existing three, equal weighted, with the book measured over their common window:
+
+| added sleeve | book Sharpe | change | P&L | extra trades |
+|---|---|---|---|---|
+| *(none, current book)* | **1.417** | — | +$21,359 | — |
+| put_vertical_singlename_wide | 1.409 | −0.009 | +$21,395 | +148 |
+| put_diagonal_ivrv_robust | 1.398 | −0.019 | +$21,000 | +204 |
+| put_vertical_multi_singlename | 1.382 | −0.035 | +$20,531 | +112 |
+| index_condor_trend | 1.378 | −0.040 | +$20,324 | +143 |
+| put_vertical_ivrv_chainonly | 1.378 | −0.040 | +$20,715 | +104 |
+| put_vertical_ivrv_tail | 1.331 | −0.087 | +$19,693 | +126 |
+
+**Every one lowers Sharpe.** The correlation matrix explains it: the put-selling specs run 0.66 to 0.98 against each
+other, and `put_vertical_ivrv` against `put_vertical_ivrv_chainonly` is **0.98** — the same strategy with a different
+gate. Adding them dilutes an equal-weighted book without diversifying it. The single genuine diversifier is already
+in: `call_vertical_downtrend` correlates −0.07 to −0.28 with everything else, which is why a 0.42 Sharpe sleeve earns
+a slot the 1.12 Sharpe diagonal does not.
+
+Trade count is a different question, and it has a price. Widening the gap fade basket at a fixed 60% budget, over the
+full 1,234 sessions:
+
+| basket | fills/week | Sharpe | CAGR | P&L | max DD | per position |
+|---|---|---|---|---|---|---|
+| 5 | 45 | 2.54 | 36.9% | +$364,581 | −10.0% | 12% of NAV |
+| 10 | 90 | 2.18 | 25.4% | +$203,227 | −9.0% | 6% |
+| 20 | 180 | 1.60 | 15.2% | +$99,835 | −7.4% | 3% |
+| 30 | 270 | 1.28 | 11.2% | +$68,408 | −7.9% | 2% |
+| 50 | 450 | 0.93 | 7.6% | +$42,781 | −7.6% | 1.2% |
+
+Each doubling of trade count roughly halves the return, because the signal is a ranking: the tenth most dislocated
+name carries less of it than the first, and the fiftieth carries almost none. More trades is not more edge, it is the
+same edge spread thinner. The two goals are genuinely opposed, and the deployed basket of 20 sits closer to the
+trade-count end than the evidence supports.
+

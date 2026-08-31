@@ -3,7 +3,7 @@
 # ============================================================
 universe:
   # Minimum average daily dollar volume (price * volume)
-  avg_dollar_volume_floor: 50_000_000   # $50M
+  avg_dollar_volume_floor: 20_000_000   # $20M — wide enough for breadth, still liquid for spreads
 
   # Minimum market capitalization
   market_cap_floor: 2_000_000_000       # $2B

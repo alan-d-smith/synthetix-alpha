@@ -72,7 +72,7 @@ def render(log: Path = LOG, table: Path = TABLE) -> Path:
     md = HEADER + "".join(
         f"| {r['evaluated_utc']} | {r['gen']} | `{r['strategy']}` | {r['underlyings']} | {r['total_return']:+.1%} | "
         f"{r['mean_sharpe']:.2f} | {r['min_sharpe']:.2f} | {r['worst_drawdown']:.1%} | {r['worst_year']:+.1%} | "
-        f"{r['trades']} | **{r['score']:+.3f}** | {'!! ' if r.get('correction') else ''}{r.get('note', '')} |\n"
+        f"{r['trades']} | **{r['score']:+.3f}** | {'⚠ ' if r.get('correction') else ''}{r.get('note', '')} |\n"
         for r in kept)
     if kept:
         md += (f"\n{len(kept)} improvements across {len(rows)} logged evaluations; "
