@@ -108,7 +108,7 @@ def _close_order(symbol: str, qty: float, *, dry_run: bool) -> dict:
                    "--type", "market", "--time-in-force", "cls", *(["--dry-run"] if dry_run else []))
 
 
-def enter(orders: list[dict], *, dry_run: bool = True, wait_seconds: int = 60, poll: int = 3) -> list[dict]:
+def enter(orders: list[dict], *, dry_run: bool = True, wait_seconds: int = 300, poll: int = 3) -> list[dict]:
     """Buy at market, wait for the fills, then place market-on-close exits for the quantity actually filled.
 
     The exit has to follow the fill. Submitting both at once can put the sell in before the position exists, and a
@@ -125,11 +125,13 @@ def enter(orders: list[dict], *, dry_run: bool = True, wait_seconds: int = 60, p
             r = cli.submit_equity(o["symbol"], o["qty"], "buy", dry_run=False)
             pending.append((o, r.get("id"), r.get("status")))
         except Exception as e:
-            pending.append((o, None, f"rejected: {type(e).__name__}"))
+            pending.append((o, None, f"rejected: {e}"))
 
     # Wait for terminal state, then cancel whatever has not filled. The exit cannot be sized until the buy
     # can no longer grow: sizing it to a partial fill leaves the remainder to fill afterwards and carry
     # overnight, which is the one thing this sleeve must never do.
+    # Opening market orders took 20-65s to fill on 2026-08-31, so a one-minute wait cancels the basket just as
+    # it is filling. Wait long enough that the cancel is a genuine no-fill, not an impatient one.
     TERMINAL = {"filled", "canceled", "expired", "rejected", "done_for_day"}
     deadline = time.time() + wait_seconds
     live = [(o, oid) for o, oid, _ in pending if oid]
@@ -163,6 +165,54 @@ def enter(orders: list[dict], *, dry_run: bool = True, wait_seconds: int = 60, p
                 exit_status = f"EXIT FAILED: {type(e).__name__}"
         out.append({**o, "buy": status, "filled_qty": qty, "exit": exit_status})
     return out
+
+
+def shortfall() -> list[dict]:
+    """Shares today's entry intended to hold but does not, taken from the account's own order history.
+
+    Intent is the largest quantity ordered in one go per symbol, not the sum: topping up submits its own buys, and
+    summing them would read the repair as fresh intent and buy the basket twice. Differencing against the live
+    position instead makes this idempotent, so it can run as often as it likes and never exceed the plan.
+    """
+    today = dt.datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+    intended: dict[str, float] = {}
+    for o in cli.orders("all"):
+        if str(o.get("side")) != "buy" or not str(o.get("submitted_at", "")).startswith(today):
+            continue
+        if str(o.get("asset_class") or "us_equity") != "us_equity":
+            continue
+        sym = str(o.get("symbol"))
+        intended[sym] = max(intended.get(sym, 0.0), float(o.get("qty") or 0))
+    held = {str(p.get("symbol")): float(p.get("qty") or 0) for p in cli.positions()}
+    out = [{"symbol": s, "qty": int(intended[s] - held.get(s, 0.0)), "intended": int(intended[s]),
+            "held": int(held.get(s, 0.0))} for s in sorted(intended)]
+    return [o for o in out if o["qty"] >= 1]
+
+
+def topup(*, dry_run: bool = True, wait_seconds: int = 300) -> list[dict]:
+    """Buy back whatever the opening entry failed to fill, and cover it market-on-close like any other entry.
+
+    An under-fill is the normal failure at the open: a market order can be cancelled holding a partial fill, or
+    none at all, which silently shrinks the book below the size that was backtested.
+
+    A partial fill already carries a resting close order, and a buy that crosses your own resting sell is rejected
+    as a wash trade, so the exit comes off before the top-up goes on. flatten() re-covers the whole position
+    afterwards, which also repairs the naked window if a buy fails in between.
+    """
+    short = shortfall()
+    if not short:
+        return []
+    names = {o["symbol"] for o in short}
+    if not dry_run:
+        for o in cli.orders("open"):
+            if str(o.get("side")) == "sell" and str(o.get("symbol")) in names:
+                cli.cancel(str(o.get("id")))
+    rows = enter(short, dry_run=dry_run, wait_seconds=wait_seconds)
+    covered = {r["symbol"]: r["status"] for r in flatten(dry_run=dry_run)}
+    for r in rows:
+        if r["symbol"] in covered:
+            r["exit"] = f"{r['exit']} + {covered[r['symbol']]}"
+    return rows
 
 
 def flatten(*, dry_run: bool = True) -> list[dict]:

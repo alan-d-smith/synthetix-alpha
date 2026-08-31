@@ -117,6 +117,8 @@ def main() -> None:
     ap.add_argument("--intraday-budget", type=float, default=0.60, help="fraction of NAV for the intraday sleeve")
     ap.add_argument("--crypto-budget", type=float, default=0.15,
                     help="fraction of NAV for the crypto dislocation sleeve (0 disables)")
+    ap.add_argument("--topup", action="store_true",
+                    help="buy back whatever the opening entry failed to fill, and cover it market-on-close")
     ap.add_argument("--flatten", action="store_true",
                     help="reconcile open longs against resting sells and cover the gap (run before 15:50 ET)")
     ap.add_argument("--equity-top", type=int, default=0, help="overnight momentum names (0 disables)")
@@ -133,6 +135,13 @@ def main() -> None:
     allowed, why = gate()
     if not allowed and not a.ignore_window:
         print(f"REFUSING TO TRADE: {why}")
+        return
+    if a.topup:
+        rows = intraday.topup(dry_run=not a.execute)
+        for r in rows:
+            print(f"{r['symbol']:<6} intended {r['intended']:>4}  held {r['held']:>4}  buying {r['qty']:>4}  "
+                  f"filled {r.get('filled_qty', 0):>4,.0f}  buy {r['buy']}  exit {r['exit']}")
+        print("entry filled as planned, nothing to top up" if not rows else f"{len(rows)} name(s) topped up")
         return
     if a.flatten:
         rows = intraday.flatten(dry_run=not a.execute)
