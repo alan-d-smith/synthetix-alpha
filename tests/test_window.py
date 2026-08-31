@@ -30,10 +30,26 @@ def test_flatten_window_respects_the_market_on_close_cutoff():
 
 
 def test_nothing_trades_after_equity_is_measured():
-    """Equity is read at Thursday's close, so Friday cannot help and must not be traded."""
+    """Equity is snapshotted at 09:30 Friday, so Friday cannot help and must not be traded."""
     assert w.can_enter(at(2026, 9, 3, 9, 45))[0], "Thursday is the last session that counts"
     assert not w.can_enter(at(2026, 9, 4, 9, 45))[0]
     assert not w.can_flatten(at(2026, 9, 4, 15, 45))[0]
+
+
+def test_the_whole_final_session_is_tradeable():
+    """The failure that matters is stopping early on Thursday, not running late."""
+    assert w.can_enter(at(2026, 9, 3, 9, 31))[0], "Thursday's entry must not be cut off"
+    assert w.can_flatten(at(2026, 9, 3, 15, 35))[0], "Thursday's first flatten pass"
+    assert w.can_flatten(at(2026, 9, 3, 15, 45))[0], "Thursday's second flatten pass"
+    assert w.LAST_CLOSE < w.CLOSES, "the guard has to outlive the last close it is protecting"
+
+
+def test_friday_pre_open_is_supervised_but_untradeable():
+    """The guard stays open across the final overnight; the sub-windows are what keep Friday shut."""
+    assert w._within(at(2026, 9, 4, 8, 0))[0], "still inside the window, so a crash there is still watched"
+    assert not w.can_enter(at(2026, 9, 4, 8, 0))[0]
+    assert not w.can_enter(at(2026, 9, 4, 9, 31))[0], "the snapshot lands at 09:30, before entry could ever open"
+    assert not w.can_flatten(at(2026, 9, 4, 8, 0))[0]
 
 
 def test_weekends_inside_the_window_are_refused():
@@ -46,10 +62,24 @@ def test_scheduler_fires_each_action_once_per_day(tmp_path, monkeypatch):
     t = at(2026, 8, 31, 9, 31)
     first = sc.due(t)
     assert sorted(a[1] for a in first) == ["deployed", "research"]
-    for action, account, _ in first:
-        sc._mark(f"{t.date().isoformat()}:{action}:{account}", {"state": "done"})
+    for _, account, _, name in first:
+        sc._mark(f"{t.date().isoformat()}:{name}:{account}", {"state": "done"})
     assert sc.due(t) == [], "an action already recorded must not run again after a restart"
     assert len(sc.due(at(2026, 9, 1, 9, 31))) == 2, "the next session starts fresh"
+
+
+def test_both_flatten_passes_are_scheduled_on_the_final_session(tmp_path, monkeypatch):
+    """Thursday has no session after it, so a missed cover cannot be repaired the next morning."""
+    from synthetix_alpha.live import schedule as sc
+    monkeypatch.setattr(sc, "STATE", tmp_path / "state.json")
+    t = at(2026, 9, 3, 15, 45)
+    passes = [(a[1], a[3]) for a in sc.due(t) if a[0] == "flatten"]
+    assert sorted(passes) == [("deployed", "flatten0"), ("deployed", "flatten1"),
+                              ("research", "flatten0"), ("research", "flatten1")]
+    sc._mark("2026-09-03:flatten0:research", {"state": "done"})
+    remaining = [(a[1], a[3]) for a in sc.due(t) if a[0] == "flatten"]
+    assert ("research", "flatten1") in remaining, "the second pass still runs when the first already has"
+    assert ("research", "flatten0") not in remaining
 
 
 def test_scheduler_runs_both_books_on_separate_accounts():

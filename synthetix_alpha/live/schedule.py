@@ -23,7 +23,13 @@ from pathlib import Path
 from synthetix_alpha.live import window
 
 STATE = Path("datasets/schedule_state.json")
-ENTRY, FLATTEN = dt.time(9, 31), dt.time(15, 45)
+# Topping up a few minutes after entry repairs an under-filled open, which is the normal failure there:
+# a market order can be cancelled holding a partial fill, silently shrinking the book below its plan.
+ENTRY, TOPUP = dt.time(9, 31), dt.time(9, 45)
+# Two passes, both inside the 15:50 market-on-close cutoff. flatten only covers what is uncovered, so the second
+# is free when the first worked and is the difference between flat and overnight when it was not. There is no
+# session after Thursday in which to repair a miss, so the margin is worth more than the duplication costs.
+FLATTEN = (dt.time(15, 35), dt.time(15, 45))
 
 # (label, account, gap fade basket). The options and crypto sleeves ride along with each entry run.
 BOOKS = [("research n=10", "research", 10), ("deployed n=20", "deployed", 20)]
@@ -46,8 +52,8 @@ def _mark(key: str, value: dict) -> None:
 def run_action(action: str, account: str, basket: int, execute: bool) -> dict:
     """Invoke the runner as a subprocess so each account gets a clean process and its own credentials."""
     cmd = [sys.executable, "-m", "synthetix_alpha.live.run", "--account", account]
-    if action == "flatten":
-        cmd += ["--flatten"]
+    if action in ("flatten", "topup"):
+        cmd += [f"--{action}"]
     else:
         cmd += ["--limit", "12", "--intraday-top", str(basket), "--intraday-budget", "0.60",
                 "--crypto-budget", "0.15"]
@@ -62,31 +68,37 @@ def run_action(action: str, account: str, basket: int, execute: bool) -> dict:
             "tail": out.strip()[-2000:]}
 
 
-def due(now: dt.datetime) -> list[tuple[str, str, int]]:
+def due(now: dt.datetime) -> list[tuple[str, str, int, str]]:
     """Actions whose time has arrived today and which have not already run."""
     today, s, out = now.date().isoformat(), _state(), []
     for label, account, basket in BOOKS:
-        for action, at in (("enter", ENTRY), ("flatten", FLATTEN)):
-            key = f"{today}:{action}:{account}"
+        timetable = [("enter", ENTRY, "enter"), ("topup", TOPUP, "topup")]
+        timetable += [("flatten", at, f"flatten{i}") for i, at in enumerate(FLATTEN)]
+        for action, at, name in timetable:
+            key = f"{today}:{name}:{account}"
             if key in s:
                 continue
-            gate = window.can_enter if action == "enter" else window.can_flatten
+            gate = window.can_flatten if action == "flatten" else window.can_enter
             if now.time() >= at and gate(now)[0]:
-                out.append((action, account, basket))
+                out.append((action, account, basket, name))
     return out
 
 
 def loop(execute: bool, poll: int = 20) -> None:
     print(f"scheduler up. execute={execute}. {window.describe()}")
     print(f"books: " + ", ".join(f"{l} ({a})" for l, a, _ in BOOKS))
-    print(f"entry {ENTRY:%H:%M} ET, flatten {FLATTEN:%H:%M} ET, state in {STATE}\n", flush=True)
+    print(f"entry {ENTRY:%H:%M}, topup {TOPUP:%H:%M}, flatten "
+          f"{' and '.join(format(t, '%H:%M') for t in FLATTEN)} ET, state in {STATE}", flush=True)
+    print(f"last session {window.LAST_CLOSE:%a %d %b}, equity snapshot "
+          f"{window.CLOSES:%a %d %b %H:%M} ET")
+    print(flush=True)
+    # No self-imposed stop: the organisers take their own snapshot, and a scheduler that decides on its own
+    # when the competition is over is one more thing that can decide wrongly. window.can_enter / can_flatten
+    # already refuse everything outside the window, so idling past it is inert. Stop it by hand when done.
     while True:
         now = window.now()
-        if now > window.CLOSES:
-            print(f"{now:%Y-%m-%d %H:%M} ET past the measurement close, scheduler exiting", flush=True)
-            return
-        for action, account, basket in due(now):
-            key = f"{now.date().isoformat()}:{action}:{account}"
+        for action, account, basket, name in due(now):
+            key = f"{now.date().isoformat()}:{name}:{account}"
             _mark(key, {"started": now.isoformat(), "state": "running"})   # mark first: a crash must not retry
             try:
                 _mark(key, run_action(action, account, basket, execute))
