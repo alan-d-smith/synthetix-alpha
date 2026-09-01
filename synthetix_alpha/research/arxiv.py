@@ -21,10 +21,18 @@ PDF_DIR = config.ROOT / "datasets" / "papers"
 CATEGORIES = ("q-fin.PM", "q-fin.TR", "q-fin.ST", "q-fin.CP", "q-fin.RM", "q-fin.MF")
 MIN_INTERVAL = 3.0  # arXiv asks for one request per three seconds
 
-# Terms that map onto what the engine can express: option structures, vol signals, premium capture.
+# Terms that map onto what the strategy can express. The first group is the options sleeve. The second was
+# added once the gap fade became the validated core: the original list scored every equity paper at zero, so
+# the loop could not surface research on the sleeve actually carrying the book. It is deliberately broad — a
+# paper on execution cost or order imbalance can sharpen a gap fade without ever naming the trade.
 RELEVANT = ("option", "volatility", "variance risk", "implied vol", "straddle", "strangle", "iron condor",
             "vertical spread", "credit spread", "covered call", "put write", "skew", "term structure",
-            "delta hedg", "gamma", "vega", "premium", "vix", "derivative")
+            "delta hedg", "gamma", "vega", "premium", "vix", "derivative",
+            "overnight", "close-to-open", "open-to-close", "opening auction", "closing auction", "intraday",
+            "revers", "gap", "order imbalance", "order flow", "microstructure", "limit order book",
+            "cross-section", "anomaly", "predictab", "momentum", "liquidity", "execution",
+            "transaction cost", "price impact", "slippage", "market maker", "portfolio sort",
+            "factor model", "equity return", "stock return")
 IRRELEVANT = ("crypto", "bitcoin", "ethereum", "uniswap", "defi", "dex", "amm ", "token", "nft", "blockchain",
               "energy market", "electricity", "insurance", "carbon", "sports betting", "housing", "agricultur")
 _last_call = 0.0

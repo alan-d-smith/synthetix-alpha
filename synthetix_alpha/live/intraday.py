@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime as dt
 import time
+from pathlib import Path
 from zoneinfo import ZoneInfo
 from typing import Optional
 
@@ -50,11 +51,33 @@ def zgap(op: pd.DataFrame, cl: pd.DataFrame, window: int = 20) -> pd.DataFrame:
     return (op / cl.shift(1) - 1) / cl.pct_change().rolling(window).std()
 
 
-def backtest(client, n: int = 20, days: int = 1825, hedge: bool = False) -> dict:
-    """Daily open-to-close returns of the gap-fade basket. hedge subtracts SPY to strip market beta."""
+def spreads() -> pd.Series:
+    """Median quoted spread in basis points per name, measured from CRSP closing bid/ask.
+
+    Charging one flat rate over-penalises SPY at 0.2bp and under-penalises REGN at 12bp, and the wide names
+    turn out to carry more signal than their spread costs, so the distinction matters.
+    """
+    path = Path(__file__).resolve().parents[2] / "datasets" / "quoted_spreads.csv"
+    if not path.exists():
+        return pd.Series(dtype=float)
+    return pd.read_csv(path, index_col="symbol")["quoted_spread_bp"]
+
+
+def backtest(client, n: int = 20, days: int = 1825, hedge: bool = False, net: bool = True) -> dict:
+    """Daily open-to-close returns of the gap-fade basket.
+
+    hedge subtracts SPY to strip market beta. net charges each name its own measured round-trip spread rather
+    than a flat rate; pass net=False for the gross series.
+    """
     op, cl = panels(client, days)
     day = cl / op - 1
-    r = day.where(zgap(op, cl).rank(axis=1, ascending=True) <= n).mean(axis=1)
+    held = zgap(op, cl).rank(axis=1, ascending=True) <= n
+    r = day.where(held).mean(axis=1)
+    if net:
+        bp = spreads().reindex(day.columns)
+        bp = bp.fillna(bp.median() if bp.notna().any() else 0.0) / 1e4
+        charged = held.mul(bp, axis=1).sum(axis=1) / held.sum(axis=1).replace(0, np.nan)
+        r = r - charged.reindex(r.index).fillna(0.0)
     if hedge and "SPY" in day:
         r = r - day["SPY"]
     r = r.dropna()

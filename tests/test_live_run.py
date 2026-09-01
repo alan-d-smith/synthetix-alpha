@@ -370,3 +370,31 @@ def test_liquidate_cancels_the_resting_close_order_first(monkeypatch):
     intraday.liquidate(dry_run=False)
     assert cancelled == ["abc"], "the resting market-on-close order has to come off before the real exit"
     assert sold == [("SRE", 75.0)]
+
+
+def test_backtest_charges_each_name_its_own_measured_spread(monkeypatch):
+    """A flat rate over-penalises SPY at 0.2bp and under-penalises REGN at 12bp, and the wide names carry
+    more signal than their spread costs, so the difference is not cosmetic."""
+    import pandas as pd
+    from synthetix_alpha.live import intraday
+    idx = pd.date_range("2024-01-01", periods=30).date
+    op = pd.DataFrame({"CHEAP": 100.0, "DEAR": 100.0}, index=idx)
+    cl = op * 1.01                                     # both gain 1% open to close every day
+    monkeypatch.setattr(intraday, "panels", lambda client, days=1825: (op, cl))
+    monkeypatch.setattr(intraday, "spreads",
+                        lambda: pd.Series({"CHEAP": 1.0, "DEAR": 101.0}))   # 1bp vs 101bp
+    gross = intraday.backtest(None, n=2, net=False)
+    net = intraday.backtest(None, n=2, net=True)
+    charged = gross["ann_return"] - net["ann_return"]
+    assert charged == pytest.approx(0.0051 * 252, rel=0.02), "mean of 1bp and 101bp is 51bp per session"
+
+
+def test_backtest_survives_a_missing_spread_table(monkeypatch):
+    import pandas as pd
+    from synthetix_alpha.live import intraday
+    idx = pd.date_range("2024-01-01", periods=30).date
+    op = pd.DataFrame({"A": 100.0, "B": 100.0}, index=idx)
+    monkeypatch.setattr(intraday, "panels", lambda client, days=1825: (op, op * 1.01))
+    monkeypatch.setattr(intraday, "spreads", lambda: pd.Series(dtype=float))
+    r = intraday.backtest(None, n=2, net=True)
+    assert r["ann_return"] > 0, "an absent cost table must not zero the strategy out"

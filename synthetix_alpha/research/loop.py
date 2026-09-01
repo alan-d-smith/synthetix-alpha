@@ -35,8 +35,16 @@ Papers queued:
 """
 
 
+# Both sleeves. The equity topics were added once the gap fade became the validated core: searching only for
+# option papers cannot turn up anything about the strategy that is actually carrying the book.
+# Both sleeves. The equity topics target the gap fade obliquely as well as directly: the sizing, timing and
+# cost questions it faces are the same ones the intraday microstructure literature works on, so a paper need
+# not name the trade to sharpen it.
 TOPICS = ("variance risk premium", "volatility risk premium", "option returns", "covered call",
-          "put writing", "implied volatility term structure", "option trading strategy", "delta hedging")
+          "put writing", "implied volatility term structure", "option trading strategy", "delta hedging",
+          "overnight returns stocks", "close-to-open return", "intraday return predictability",
+          "short-term reversal stocks", "opening auction imbalance", "cross-section of stock returns",
+          "execution cost equity", "order flow imbalance", "intraday portfolio sorts")
 
 
 def find(limit: int = 5, min_relevance: float = 0.4, since_days: int = 120, download: bool = True,
