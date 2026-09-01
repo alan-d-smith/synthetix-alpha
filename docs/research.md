@@ -1290,3 +1290,42 @@ trip against a measured round trip of 1.72bp, four times over.
 
 Never previously tested. Entering at 09:31 returns 16.66% against 8.51% at 09:45 and 3.26% at 11:00; 09:35 is
 statistically identical (+0.42pp, t 0.10), so the fill latency the live sleeve actually experiences costs nothing.
+
+## The edge is regime-dependent, not dead
+
+The corrected sleeve looked like it was decaying. Isolating the signal from the market — long the 10 biggest
+gap-downs, short an equal-weight basket of the universe, so beta is 0 by construction — shows the pure signal by
+year: **+8.5%, +13.8%, +12.6%, +13.9%** for 2022–25, then **−12.4% in 2026**. The rolling 250-session Sharpe of
+that series falls from +1.75 in March 2025 to **−0.29 today**, and the Fama-MacBeth coefficient flips sign in 2026
+(+0.00047 against −0.0008 in every prior year).
+
+The long-only book still posted +10.8% in 2026 because beta carried it: decomposed, the signal contributed
+**−12.4%** and market exposure **+5.2%**. We were being paid by the market while the edge did nothing.
+
+It is a volatility regime, not arbitrage. Nagel (2012, *RFS*) reads short-term reversal returns as compensation
+for supplying liquidity and shows the expected return is "strongly time-varying and highly predictable with the
+VIX index". Our own history says the same. Gating on where volatility sits in its own trailing year, which has no
+threshold to fit:
+
+| gate | days traded | signal ann | Sharpe | t | t (2026) |
+|---|---|---|---|---|---|
+| always trade | 100% | 8.46% | 0.75 | 1.66 | **−0.69** |
+| VIX above own 50th pct | 31% | 23.55% | 2.02 | 2.51 | +0.60 |
+| VIX above own 70th pct | 19% | 34.09% | 2.75 | 2.68 | +0.72 |
+
+The gate restores 2026 to positive. SPY realised volatility gates almost as well (long-only Sharpe 0.84 → 1.93 at
+the median, 2026 t +0.96) and needs nothing the sleeve does not already fetch, so `intraday.vol_regime` is built on
+that with VIX kept as the validating instrument. Cross-sectional dispersion and Pastor-Stambaugh liquidity were
+also tried: dispersion is noisy and PS has only 51 overlapping months (loading t −0.47), too little to judge.
+
+**Right now the market is at the 5th percentile of its trailing year, so the gate says stand aside.**
+
+Two failures worth recording. Shorting gap-*ups* to neutralise beta does not work — the short leg returns +1.3% at
+Sharpe 0.07, because down-gaps are forced selling and revert while up-gaps are information and do not; shorting the
+universe is the better neutraliser. And residualising each name's gap against the market gap leaves beta unchanged
+at ~1.0: the exposure comes from holding ten long positions, not from the ranking picking high-beta names.
+
+A third near-miss is worth recording as method. Splitting gap-downs by *today's* volume looked spectacular — the
+light-volume tercile returned +63.8% against −62.3% for the heavy. It was the same look-ahead as the z-gap bug:
+a name that slides all day trades heavily, one that quietly recovers does not, so today's volume encodes the
+outcome. Using *yesterday's* volume the spread collapses to 12.8% against 8.8%, against a 10.4% baseline — nothing.

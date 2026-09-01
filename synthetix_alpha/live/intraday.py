@@ -121,6 +121,30 @@ def rank_today(client, n: int = 20, days: int = 60, require_fresh: bool = True) 
     return pd.DataFrame({"open": op.loc[today].reindex(z.index), "gap": gap, "z": z}).head(n)
 
 
+def vol_regime(client, lookback: int = 400) -> float:
+    """Where market volatility sits in its own trailing year, as a percentile in [0, 1].
+
+    Fading a gap is liquidity provision: you buy what someone is dumping at the open and hope it comes back.
+    Nagel (2012, RFS) shows the return to that service tracks VIX, being paid when liquidity is scarce and
+    worth nothing when markets are calm. Our own history agrees - the signal runs Sharpe 2.0 on the more
+    volatile half of days and roughly zero on the calm half, and 2026's apparent decay is a calm-market
+    regime rather than the edge being arbitraged away.
+
+    Measured from SPY realised volatility rather than VIX so the gate needs nothing the sleeve does not
+    already fetch. Returns 0.5 when there is too little history to judge, which trades rather than blocks.
+    """
+    end = dt.date.today()
+    bars = client.stock_bars(["SPY"], "1Day", end - dt.timedelta(days=lookback * 2), end)
+    if bars.empty:
+        return 0.5
+    close = bars.reset_index().set_index("timestamp")["close"].astype(float).sort_index()
+    rv = close.pct_change().rolling(20).std().dropna()
+    if len(rv) < 60:
+        return 0.5
+    window = rv.tail(252)
+    return float((window <= rv.iloc[-1]).mean())
+
+
 def plan(nav: float, client, n: int = 20, budget_pct: float = 0.40) -> list[dict]:
     """Equal-weight buys across today's gap-downs, capped at budget_pct of NAV."""
     picks = rank_today(client, n)

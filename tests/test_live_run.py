@@ -474,3 +474,37 @@ def test_zgap_denominator_cannot_see_todays_close():
     z = intraday.zgap(op, cl).iloc[-1]
     assert z["RECOVERS"] == pytest.approx(z["KEEPS_FALLING"], rel=1e-9), \
         "today's close leaked into the ranking"
+
+
+def test_vol_regime_reports_where_volatility_sits(monkeypatch):
+    """Calm markets must score low: that is the whole point of the gate."""
+    import numpy as np
+    import pandas as pd
+    from synthetix_alpha.live import intraday
+
+    def bars(vols):
+        rng = np.random.default_rng(3)
+        r = np.concatenate([rng.normal(0, v, 120) for v in vols])
+        px = 100 * np.cumprod(1 + r)
+        idx = pd.date_range("2024-01-01", periods=len(px))
+        return pd.DataFrame({"close": px}, index=pd.Index(idx, name="timestamp"))
+
+    class C:
+        def __init__(self, v): self.v = v
+        def stock_bars(self, *a, **k): return bars(self.v)
+
+    calm = intraday.vol_regime(C([0.03, 0.03, 0.002]))       # ends in a quiet stretch
+    stormy = intraday.vol_regime(C([0.003, 0.003, 0.04]))    # ends in a violent one
+    assert calm < 0.25, "a calm tape must score low"
+    assert stormy > 0.70, "a volatile tape must score high"
+    assert stormy - calm > 0.4, "the gate has to separate the two regimes, not just order them"
+
+
+def test_vol_regime_trades_when_it_cannot_judge(monkeypatch):
+    import pandas as pd
+    from synthetix_alpha.live import intraday
+
+    class Empty:
+        def stock_bars(self, *a, **k): return pd.DataFrame()
+
+    assert intraday.vol_regime(Empty()) == 0.5, "absent data must not silently block trading"
