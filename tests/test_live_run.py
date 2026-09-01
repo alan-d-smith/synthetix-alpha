@@ -508,3 +508,25 @@ def test_vol_regime_trades_when_it_cannot_judge(monkeypatch):
         def stock_bars(self, *a, **k): return pd.DataFrame()
 
     assert intraday.vol_regime(Empty()) == 0.5, "absent data must not silently block trading"
+
+
+def test_vol_gate_blocks_the_sleeve_in_calm_markets(monkeypatch, capsys):
+    """Below the gate the signal has historically been worth nothing, so the book must hold cash rather
+    than pay spread for a coin flip."""
+    from synthetix_alpha.live import run as live_run, intraday
+    planned = []
+    monkeypatch.setattr(intraday, "vol_regime", lambda client: 0.05)
+    monkeypatch.setattr(intraday, "plan", lambda *a, **k: planned.append(1) or [{"symbol": "X"}])
+    monkeypatch.setattr(intraday, "enter", lambda picks, **k: [])
+    monkeypatch.setattr(live_run, "AlpacaClient", lambda *a, **k: object())
+    monkeypatch.setattr(live_run, "plan", lambda *a, **k: {"nav": 100000.0, "skipped": {}, "halts": [],
+                                                          "approved": [], "screened": []})
+    monkeypatch.setattr(live_run.cli, "account",
+                        lambda: {"account_number": "X", "equity": "100000", "cash": "100000"})
+    monkeypatch.setattr(live_run.window, "can_enter", lambda t=None: (True, "ok"))
+    monkeypatch.setattr(live_run, "use_account", lambda name: None)
+    monkeypatch.setattr("sys.argv", ["run", "--intraday-top", "10", "--crypto-budget", "0",
+                                     "--limit", "0", "--vol-gate", "0.5"])
+    live_run.main()
+    assert planned == [], "the sleeve must not even build a plan below the gate"
+    assert "standing aside" in capsys.readouterr().out
