@@ -1200,3 +1200,68 @@ name carries less of it than the first, and the fiftieth carries almost none. Mo
 same edge spread thinner. The two goals are genuinely opposed, and the deployed basket of 20 sits closer to the
 trade-count end than the evidence supports.
 
+
+## WRDS: what it settled
+
+Access is the REST API at `wrds-api.wharton.upenn.edu`, keyed by `WRDS` in the environment. Three behaviours cost
+time before they were understood, and all three are handled in `synthetix_alpha/data/wrds.py`: the `count` field is
+stale and carries values across unrelated requests, so only `len(results)` is real; filters on unregistered columns
+are dropped silently rather than rejected, so `fields()` asks each endpoint via HTTP OPTIONS which columns actually
+bind; and `ordering=-date` works while `sort` and `order_by` are ignored, which is how the real cutoffs were found.
+OptionMetrics ends 2025-08-29 and CRSP daily 2024-12-31 (`dsf_v2` runs to 2025-12-31), so **nothing here can reach
+the order path** — it is a research instrument, not a data feed.
+
+### The gap fade is not factor exposure
+
+Regressing 1,205 sessions of daily returns on Fama-French five factors plus momentum, and then on reversal
+portfolios built from our own universe over the same open-to-close window:
+
+| model | alpha | t |
+|---|---|---|
+| FF3 + momentum | 16.12% | 2.81 |
+| FF5 + momentum | 16.31% | 2.85 |
+| FF5 + momentum + 1-day and 21-day reversal | **16.76%** | **2.95** |
+
+Market beta is 0.508 and highly significant, so a third of the variance is simply being long equities — over a
+four-day window the market matters more than the alpha does. The reversal loadings are real (str21 +0.068, t 3.15)
+but correlations are only 0.10 and 0.18, so this is not a repackaged reversal anomaly. One caveat against our own
+result: both reversal portfolios lost money over the window, so controlling for them cannot subtract much.
+
+Fama-MacBeth on 1,234 daily cross-sections is the stronger evidence. The z-gap coefficient is **−0.00140, t = −7.92**
+alone and **t = −8.26** once yesterday's open-to-close return is added, while that prior return contributes nothing
+(t −0.60) and its second lag nothing at all (t +0.01). Heston-Korajczyk-Sadka periodicity (arXiv:1005.3535) is real
+at half-hourly intervals but does not operate at the interval this sleeve trades.
+
+### The IV/RV gate is not supported
+
+The options spec gates on `iv_rv_ratio >= 1.27`. Measured against OptionMetrics — implied vol today against the vol
+subsequently realised over the same 30-day horizon, 14,807 name-days across 20 names — the pooled numbers look
+decisive: gate +1.03 vol points at t 6.04 against +0.17 unconditional. They are an artefact. Thirty-day forward vol
+on daily observations overlaps 21 deep and twenty large caps share one vol factor, so the effective sample is nearer
+forty observations than fifteen thousand. One observation per day with Newey-West errors:
+
+| series | mean VRP | naive t | NW t |
+|---|---|---|---|
+| no gate | +0.41p | 2.07 | 0.58 |
+| iv/rv >= 1.27 | +0.61p | 2.31 | 0.79 |
+| gate minus below, paired | **−0.30p** | −1.24 | −0.49 |
+
+The gate selects names that deliver a *slightly worse* premium than the ones it rejects. Only `iv/rv >= 2.00` shows
+anything (+6.72p, NW t 4.04) across 106 of 858 days, which is a far rarer condition than the spec claims.
+
+### Costs are lower than assumed, and cheap names are not better
+
+CRSP `dsf_v2` closing quotes across the traded universe: median spread **1.72bp**, mean 2.41bp, 90th percentile
+5.25bp, ranging from SPY at 0.20bp to REGN at 12.14bp. The flat 3bp charged in backtests is therefore conservative,
+and `intraday.backtest` now charges each name its own measured spread from `datasets/quoted_spreads.csv`. The gap
+fade nets **41.34% at Sharpe 2.34** for n=10 against 46.99% gross.
+
+Excluding wide-spread names makes it monotonically worse — n=10 falls 41.33% → 39.00% → 33.26% → 25.24% as the
+widest 9%, 25% and 50% are dropped. The wide names carry more signal than their spread costs, which is the universe's
+breadth premise stated in cost-aware terms. It also settles the intraday round-trip idea: breakeven was 0.40bp per
+trip against a measured round trip of 1.72bp, four times over.
+
+### Entry timing was already right
+
+Never previously tested. Entering at 09:31 returns 16.66% against 8.51% at 09:45 and 3.26% at 11:00; 09:35 is
+statistically identical (+0.42pp, t 0.10), so the fill latency the live sleeve actually experiences costs nothing.
