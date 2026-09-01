@@ -115,6 +115,9 @@ def main() -> None:
     ap.add_argument("--execute", action="store_true", help="submit for real (default is a dry run)")
     ap.add_argument("--intraday-top", type=int, default=20, help="gap-fade names, flat by the close (0 disables)")
     ap.add_argument("--intraday-budget", type=float, default=0.60, help="fraction of NAV for the intraday sleeve")
+    ap.add_argument("--vol-gate", type=float, default=0.50,
+                    help="skip the gap fade unless market volatility sits above this percentile of its own "
+                         "trailing year; 0 disables the gate")
     ap.add_argument("--crypto-budget", type=float, default=0.15,
                     help="fraction of NAV for the crypto dislocation sleeve (0 disables)")
     ap.add_argument("--topup", action="store_true",
@@ -164,11 +167,21 @@ def main() -> None:
     if a.intraday_top:
         print(f"\nintraday gap-fade ({a.intraday_budget:.0%} of NAV, flat by the close):")
         client = AlpacaClient()
-        picks = intraday.plan(p["nav"], client, n=a.intraday_top, budget_pct=a.intraday_budget)
+        # Fading a gap is liquidity provision, and that is only paid for when liquidity is scarce. Below
+        # the gate the signal has historically been worth nothing, so the book holds cash rather than
+        # paying spread for a coin flip. See docs/research.md.
+        regime = intraday.vol_regime(client) if a.vol_gate else 1.0
+        if regime < a.vol_gate:
+            print(f"  volatility at the {regime:.0%} percentile of its trailing year, below the "
+                  f"{a.vol_gate:.0%} gate: standing aside")
+            picks = []
+        else:
+            print(f"  volatility at the {regime:.0%} percentile, gate {a.vol_gate:.0%}: trading")
+            picks = intraday.plan(p["nav"], client, n=a.intraday_top, budget_pct=a.intraday_budget)
         for o in intraday.enter(picks, dry_run=not a.execute):
             print(f"{o['symbol']:<6} {o['qty']:>5} sh  ${o['notional']:>9,.0f}  gap {o['gap']:+.2%} (z {o['z']:+.1f})  "
                   f"buy {o['buy']} / exit {o['exit']}")
-        if not picks:
+        if not picks and regime >= a.vol_gate:
             print("no gap-down candidates")
     if a.crypto_budget:
         print(f"\ncrypto dislocations (z < -{crypto.THRESHOLD}, {a.crypto_budget:.0%} of NAV, {crypto.HOLD}h hold):")
