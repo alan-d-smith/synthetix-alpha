@@ -154,22 +154,22 @@ class PipelineOrchestrator:
             result.errors.append("GATHER: no candidates had enough data")
             return result
 
-        # Phase 3 - CRITIQUE (with confidence threshold)
+        # Phase 3 - CRITIQUE (with ensemble consistency + confidence threshold)
         try:
-            raw_decisions = self._critic.evaluate_batch(inputs)
+            raw_decisions = self._critic.evaluate_batch(inputs, consistency=True)
             result.approved_by_critic = [
                 d for d in raw_decisions
-                if d.decision.upper() == "APPROVED"
+                if d.decision == "APPROVED"
                 and d.confidence >= self._confidence_threshold
             ]
             result.rejected_by_critic = [
                 d for d in raw_decisions
-                if d.decision.upper() != "APPROVED"
+                if d.decision != "APPROVED"
                 or d.confidence < self._confidence_threshold
             ]
             result.decisions = raw_decisions
             logger.info(
-                "Phase 3 CRITIQUE: %d approved (conf >= %d), %d rejected",
+                "Phase 3 CRITIQUE (ensemble): %d approved (conf >= %d), %d rejected",
                 len(result.approved_by_critic),
                 self._confidence_threshold,
                 len(result.rejected_by_critic),
