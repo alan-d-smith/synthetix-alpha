@@ -398,3 +398,47 @@ def test_backtest_survives_a_missing_spread_table(monkeypatch):
     monkeypatch.setattr(intraday, "spreads", lambda: pd.Series(dtype=float))
     r = intraday.backtest(None, n=2, net=True)
     assert r["ann_return"] > 0, "an absent cost table must not zero the strategy out"
+
+
+def test_screen_refuses_names_whose_option_chains_are_untradeable(monkeypatch):
+    """Stock liquidity says nothing about the chain: MDLZ trades heavily and quotes 91% wide with zero
+    contract volume, which is why the sleeve kept screening names it could never fill."""
+    import pandas as pd
+    from synthetix_alpha.live import screen
+    scanned = pd.DataFrame({"iv_rv_ratio": [1.4, 1.5]}, index=["SPY", "MDLZ"])
+    monkeypatch.setattr(screen, "scan", lambda **kw: scanned)
+    monkeypatch.setattr(screen, "liquidity", lambda syms, **kw: pd.DataFrame(
+        {"price": [500.0, 70.0], "avg_dollar_volume": [9e9, 5e8], "liquid": [True, True]}, index=syms))
+    monkeypatch.setattr(screen, "option_liquidity",
+                        lambda: pd.Series({"SPY": 0.0053, "MDLZ": 0.9091}))
+    monkeypatch.setattr(screen, "days_to_earnings",
+                        lambda syms, asof=None: pd.Series({s: 90.0 for s in syms}, name="days_to_earnings"))
+    out = screen.candidates(max_chain_spread=0.10)
+    assert list(out.index) == ["SPY"], "a 91%-wide chain can never clear the spec's fill ratio"
+
+
+def test_screen_refuses_names_with_no_chain_measurement(monkeypatch):
+    """An unmeasured name is refused rather than assumed good: the measured failures are already dire."""
+    import pandas as pd
+    from synthetix_alpha.live import screen
+    scanned = pd.DataFrame({"iv_rv_ratio": [1.4, 1.5]}, index=["SPY", "OBSCURE"])
+    monkeypatch.setattr(screen, "scan", lambda **kw: scanned)
+    monkeypatch.setattr(screen, "liquidity", lambda syms, **kw: pd.DataFrame(
+        {"price": [500.0, 40.0], "avg_dollar_volume": [9e9, 8e7], "liquid": [True, True]}, index=syms))
+    monkeypatch.setattr(screen, "option_liquidity", lambda: pd.Series({"SPY": 0.0053}))
+    monkeypatch.setattr(screen, "days_to_earnings",
+                        lambda syms, asof=None: pd.Series({s: 90.0 for s in syms}, name="days_to_earnings"))
+    assert list(screen.candidates(max_chain_spread=0.10).index) == ["SPY"]
+
+
+def test_screen_still_works_without_the_chain_table(monkeypatch):
+    import pandas as pd
+    from synthetix_alpha.live import screen
+    scanned = pd.DataFrame({"iv_rv_ratio": [1.4]}, index=["SPY"])
+    monkeypatch.setattr(screen, "scan", lambda **kw: scanned)
+    monkeypatch.setattr(screen, "liquidity", lambda syms, **kw: pd.DataFrame(
+        {"price": [500.0], "avg_dollar_volume": [9e9], "liquid": [True]}, index=syms))
+    monkeypatch.setattr(screen, "option_liquidity", lambda: pd.Series(dtype=float))
+    monkeypatch.setattr(screen, "days_to_earnings",
+                        lambda syms, asof=None: pd.Series({"SPY": 90.0}, name="days_to_earnings"))
+    assert list(screen.candidates().index) == ["SPY"], "an absent table must not empty the screen"

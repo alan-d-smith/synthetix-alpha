@@ -113,6 +113,19 @@ def liquidity(symbols: list[str], u: Optional[dict] = None, days: int = 20, clie
     return out
 
 
+def option_liquidity() -> pd.Series:
+    """Median relative bid-ask of each name's near-the-money chain, from OptionMetrics.
+
+    Stock liquidity says nothing about whether the options are tradeable: MDLZ trades hundreds of millions a day
+    and its chain quotes 91% wide, with a median contract volume of zero. Measured on 2025 data, which is fine
+    because chain liquidity is a persistent property of a name rather than a signal.
+    """
+    path = Path(__file__).resolve().parents[2] / "datasets" / "option_liquidity.csv"
+    if not path.exists():
+        return pd.Series(dtype=float)
+    return pd.read_csv(path).set_index("ticker")["chain_spread"]
+
+
 def days_to_earnings(symbols: list[str], asof: Optional[dt.date] = None) -> pd.Series:
     """Days to each name's next announcement. NaN when unknown, which the caller treats as disqualifying."""
     from synthetix_alpha.data import yf
@@ -128,7 +141,7 @@ def days_to_earnings(symbols: list[str], asof: Optional[dt.date] = None) -> pd.S
 
 
 def candidates(iv_rv_min: float = 1.25, limit: int = 15, client=None, min_days_to_earnings: float = 30.0,
-               asof: Optional[dt.date] = None) -> pd.DataFrame:
+               asof: Optional[dt.date] = None, max_chain_spread: float = 0.10) -> pd.DataFrame:
     """In-regime names that clear the liquidity floors and are clear of earnings.
 
     IV is often rich precisely because an announcement is near, which is the one setup the backtest says to avoid.
@@ -141,6 +154,15 @@ def candidates(iv_rv_min: float = 1.25, limit: int = 15, client=None, min_days_t
     out = out[out["liquid"]].drop(columns="liquid")
     if out.empty:
         return out
+    # A spread wider than this cannot clear the spec's min_fill_ratio: a vertical crosses two legs, so the
+    # credit left after crossing falls below 60% of the mid credit long before the chain looks merely thin.
+    # Names with no measurement are refused rather than assumed good; the ones that fail are far worse.
+    chains = option_liquidity()
+    if not chains.empty:
+        keep = chains[chains <= max_chain_spread].index
+        out = out[out.index.isin(keep)]
+        if out.empty:
+            return out
     out = out.join(days_to_earnings(list(out.index), asof))
     return out[out["days_to_earnings"] >= min_days_to_earnings].head(limit)
 
