@@ -26,10 +26,10 @@ STATE = Path("datasets/schedule_state.json")
 # Topping up a few minutes after entry repairs an under-filled open, which is the normal failure there:
 # a market order can be cancelled holding a partial fill, silently shrinking the book below its plan.
 ENTRY, TOPUP = dt.time(9, 31), dt.time(9, 45)
-# Two passes, both inside the 15:50 market-on-close cutoff. flatten only covers what is uncovered, so the second
-# is free when the first worked and is the difference between flat and overnight when it was not. There is no
-# session after Thursday in which to repair a miss, so the margin is worth more than the duplication costs.
-FLATTEN = (dt.time(15, 35), dt.time(15, 45))
+# Two passes. The exit is a plain market order rather than market-on-close, so the 15:50 cutoff no longer binds
+# and these sit as late as is safe: closer to the close the backtest measures, with enough session left to fill.
+# The second pass sells whatever the first missed, and is a no-op once the book is flat.
+FLATTEN = (dt.time(15, 50), dt.time(15, 56))
 
 # (label, account, gap fade basket). The options and crypto sleeves ride along with each entry run.
 BOOKS = [("research n=10", "research", 10), ("deployed n=20", "deployed", 20)]

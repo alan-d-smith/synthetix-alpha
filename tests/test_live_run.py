@@ -216,11 +216,13 @@ def test_partial_fill_is_cancelled_before_the_exit_is_sized(monkeypatch):
 def test_flatten_covers_only_the_uncovered_quantity(monkeypatch):
     from synthetix_alpha.live import intraday
     sent = []
+    E = "us_equity"
     monkeypatch.setattr(intraday.cli, "positions", lambda: [
-        {"symbol": "AAA", "qty": "10"},      # 4 already resting -> 6 uncovered
-        {"symbol": "BBB", "qty": "5"},       # fully covered -> nothing
-        {"symbol": "CCC", "qty": "7"},       # nothing resting -> all 7
-        {"symbol": "DDD", "qty": "-3"},      # a short is not ours to cover
+        {"symbol": "AAA", "qty": "10", "asset_class": E},   # 4 already resting -> 6 uncovered
+        {"symbol": "BBB", "qty": "5", "asset_class": E},    # fully covered -> nothing
+        {"symbol": "CCC", "qty": "7", "asset_class": E},    # nothing resting -> all 7
+        {"symbol": "DDD", "qty": "-3", "asset_class": E},   # a short is not ours to cover
+        {"symbol": "ZZZ260101P00100000", "qty": "1", "asset_class": "us_option"},   # a spread's long leg
     ])
     monkeypatch.setattr(intraday.cli, "orders", lambda status="open": [
         {"symbol": "AAA", "side": "sell", "qty": "4", "filled_qty": "0"},
@@ -229,14 +231,15 @@ def test_flatten_covers_only_the_uncovered_quantity(monkeypatch):
     ])
     monkeypatch.setattr(intraday.cli, "run", lambda *a, **k: sent.append(a) or {"status": "accepted"})
     out = {r["symbol"]: r for r in intraday.flatten(dry_run=False)}
-    assert set(out) == {"AAA", "CCC"}
+    assert set(out) == {"AAA", "CCC"}, "an option leg must never be covered as if it were a loose long"
     assert out["AAA"]["uncovered"] == 6.0 and out["CCC"]["uncovered"] == 7.0
     assert all("cls" in a for a in sent) and len(sent) == 2
 
 
 def test_flatten_is_a_noop_when_everything_is_covered(monkeypatch):
     from synthetix_alpha.live import intraday
-    monkeypatch.setattr(intraday.cli, "positions", lambda: [{"symbol": "AAA", "qty": "10"}])
+    monkeypatch.setattr(intraday.cli, "positions",
+                        lambda: [{"symbol": "AAA", "qty": "10", "asset_class": "us_equity"}])
     monkeypatch.setattr(intraday.cli, "orders", lambda status="open": [
         {"symbol": "AAA", "side": "sell", "qty": "10", "filled_qty": "0"}])
     assert intraday.flatten(dry_run=True) == []
@@ -333,3 +336,37 @@ def test_remote_query_coerces_numeric_columns(monkeypatch):
     df = dolt.query_remote("SELECT 1")
     assert df["iv_rv"].dtype.kind == "f" and df["iv_rank"].dtype.kind == "f"
     assert df["symbol"].iloc[0] == "AAA"
+
+
+def test_liquidate_never_touches_an_option_leg(monkeypatch):
+    """A vertical's long leg is not a loose long. Selling it alone leaves the short leg naked."""
+    from synthetix_alpha.live import intraday
+    sold = []
+    monkeypatch.setattr(intraday.cli, "positions", lambda: [
+        {"symbol": "SRE", "qty": "75", "asset_class": "us_equity", "market_value": "6000"},
+        {"symbol": "VLO261016P00300000", "qty": "1", "asset_class": "us_option", "market_value": "250"},
+        {"symbol": "VLO261016P00320000", "qty": "-1", "asset_class": "us_option", "market_value": "-670"},
+    ])
+    monkeypatch.setattr(intraday.cli, "orders", lambda status="open": [])
+    monkeypatch.setattr(intraday.cli, "run", lambda *a, **k: {"status": "accepted"})
+    monkeypatch.setattr(intraday, "_market_exit",
+                        lambda sym, qty, *, dry_run: sold.append((sym, qty)) or {"status": "accepted"})
+    out = intraday.liquidate(dry_run=False)
+    assert [r["symbol"] for r in out] == ["SRE"]
+    assert sold == [("SRE", 75.0)]
+
+
+def test_liquidate_cancels_the_resting_close_order_first(monkeypatch):
+    """A resting sell in the same name is rejected as a wash trade against our own exit."""
+    from synthetix_alpha.live import intraday
+    cancelled, sold = [], []
+    monkeypatch.setattr(intraday.cli, "positions", lambda: [
+        {"symbol": "SRE", "qty": "75", "asset_class": "us_equity", "market_value": "6000"}])
+    monkeypatch.setattr(intraday.cli, "orders", lambda status="open": [
+        {"id": "abc", "symbol": "SRE", "side": "sell", "qty": "75", "filled_qty": "0"}])
+    monkeypatch.setattr(intraday.cli, "cancel", lambda oid: cancelled.append(oid) or {"status": "canceled"})
+    monkeypatch.setattr(intraday, "_market_exit",
+                        lambda sym, qty, *, dry_run: sold.append((sym, qty)) or {"status": "accepted"})
+    intraday.liquidate(dry_run=False)
+    assert cancelled == ["abc"], "the resting market-on-close order has to come off before the real exit"
+    assert sold == [("SRE", 75.0)]

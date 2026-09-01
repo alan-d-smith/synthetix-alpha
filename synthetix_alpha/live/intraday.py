@@ -103,9 +103,20 @@ def plan(nav: float, client, n: int = 20, budget_pct: float = 0.40) -> list[dict
 
 
 def _close_order(symbol: str, qty: float, *, dry_run: bool) -> dict:
-    """Market-on-close sell, so the exit prints at the official close the backtest measures."""
+    """Market-on-close sell, placed at entry as insurance only.
+
+    This is not the exit we rely on. The paper engine has no closing auction to route a `cls` order to, so it
+    sits unfilled and expires at 16:01: on 2026-08-31 that carried a whole session's book overnight uncovered.
+    liquidate() is what actually gets the book flat.
+    """
     return cli.run("order", "submit", "--symbol", symbol, "--qty", str(qty), "--side", "sell",
                    "--type", "market", "--time-in-force", "cls", *(["--dry-run"] if dry_run else []))
+
+
+def _market_exit(symbol: str, qty: float, *, dry_run: bool) -> dict:
+    """Plain market sell. Fills in seconds, which is the whole point: it is the order that actually works."""
+    return cli.run("order", "submit", "--symbol", symbol, "--qty", str(qty), "--side", "sell",
+                   "--type", "market", "--time-in-force", "day", *(["--dry-run"] if dry_run else []))
 
 
 def enter(orders: list[dict], *, dry_run: bool = True, wait_seconds: int = 300, poll: int = 3) -> list[dict]:
@@ -235,6 +246,8 @@ def flatten(*, dry_run: bool = True) -> list[dict]:
         held = float(pos.get("qty") or 0)
         if held <= 0:                                   # shorts are not this sleeve's doing; leave them alone
             continue
+        if pos.get("asset_class") != "us_equity":       # a spread's long leg is not a loose long: selling it
+            continue                                    # alone strips the hedge off the short leg
         uncovered = held - resting.get(sym, 0.0)
         if uncovered <= 0:
             continue
@@ -248,3 +261,33 @@ def flatten(*, dry_run: bool = True) -> list[dict]:
                     "uncovered": uncovered, "status": status})
     return out
 
+
+
+def liquidate(*, dry_run: bool = True) -> list[dict]:
+    """Sell every equity long outright, taking the resting close orders off first.
+
+    This is the exit. The market-on-close order placed at entry is insurance that this account does not honour,
+    so the book is only actually flat once these fills come back. Run it late enough that the price is close to
+    the close, but with enough of the session left for a market order to fill.
+
+    Option legs are never touched: the vertical's short leg carries a negative quantity and would be left
+    behind, turning defined risk into a naked short.
+    """
+    positions = [p for p in cli.positions()
+                 if p.get("asset_class") == "us_equity" and float(p.get("qty") or 0) > 0]
+    names = {str(p.get("symbol")) for p in positions}
+    if not dry_run:
+        for o in cli.orders("open"):                    # our own resting sell blocks the exit as a wash trade
+            if str(o.get("side")) == "sell" and str(o.get("symbol")) in names:
+                cli.cancel(str(o.get("id")))
+    out = []
+    for p in positions:
+        sym, qty = str(p.get("symbol")), float(p.get("qty"))
+        status = "would sell"
+        if not dry_run:
+            try:
+                status = _market_exit(sym, qty, dry_run=False).get("status", "submitted")
+            except Exception as e:
+                status = f"FAILED: {type(e).__name__}: {e}"
+        out.append({"symbol": sym, "qty": qty, "value": float(p.get("market_value") or 0), "status": status})
+    return out

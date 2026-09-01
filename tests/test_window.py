@@ -26,7 +26,8 @@ def test_entry_is_an_opening_trade_only():
 def test_flatten_window_respects_the_market_on_close_cutoff():
     assert not w.can_flatten(at(2026, 8, 31, 15, 29))[0]
     assert w.can_flatten(at(2026, 8, 31, 15, 45))[0]
-    assert not w.can_flatten(at(2026, 8, 31, 15, 56))[0], "market-on-close orders stop being accepted at 15:50"
+    assert w.can_flatten(at(2026, 8, 31, 15, 56))[0], "a market order still fills at 15:56"
+    assert not w.can_flatten(at(2026, 8, 31, 15, 59))[0], "too close to the bell to trust a fill"
 
 
 def test_nothing_trades_after_equity_is_measured():
@@ -39,8 +40,8 @@ def test_nothing_trades_after_equity_is_measured():
 def test_the_whole_final_session_is_tradeable():
     """The failure that matters is stopping early on Thursday, not running late."""
     assert w.can_enter(at(2026, 9, 3, 9, 31))[0], "Thursday's entry must not be cut off"
-    assert w.can_flatten(at(2026, 9, 3, 15, 35))[0], "Thursday's first flatten pass"
-    assert w.can_flatten(at(2026, 9, 3, 15, 45))[0], "Thursday's second flatten pass"
+    assert w.can_flatten(at(2026, 9, 3, 15, 50))[0], "Thursday's first flatten pass"
+    assert w.can_flatten(at(2026, 9, 3, 15, 56))[0], "Thursday's second flatten pass"
     assert w.LAST_CLOSE < w.CLOSES, "the guard has to outlive the last close it is protecting"
 
 
@@ -72,7 +73,7 @@ def test_both_flatten_passes_are_scheduled_on_the_final_session(tmp_path, monkey
     """Thursday has no session after it, so a missed cover cannot be repaired the next morning."""
     from synthetix_alpha.live import schedule as sc
     monkeypatch.setattr(sc, "STATE", tmp_path / "state.json")
-    t = at(2026, 9, 3, 15, 45)
+    t = at(2026, 9, 3, 15, 56)
     passes = [(a[1], a[3]) for a in sc.due(t) if a[0] == "flatten"]
     assert sorted(passes) == [("deployed", "flatten0"), ("deployed", "flatten1"),
                               ("research", "flatten0"), ("research", "flatten1")]

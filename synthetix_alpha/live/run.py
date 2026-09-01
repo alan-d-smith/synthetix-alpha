@@ -120,7 +120,7 @@ def main() -> None:
     ap.add_argument("--topup", action="store_true",
                     help="buy back whatever the opening entry failed to fill, and cover it market-on-close")
     ap.add_argument("--flatten", action="store_true",
-                    help="reconcile open longs against resting sells and cover the gap (run before 15:50 ET)")
+                    help="sell every equity long outright; the market-on-close order does not fill here")
     ap.add_argument("--equity-top", type=int, default=0, help="overnight momentum names (0 disables)")
     ap.add_argument("--equity-budget", type=float, default=0.20, help="fraction of NAV for the momentum sleeve")
     a = ap.parse_args()
@@ -144,11 +144,15 @@ def main() -> None:
         print("entry filled as planned, nothing to top up" if not rows else f"{len(rows)} name(s) topped up")
         return
     if a.flatten:
-        rows = intraday.flatten(dry_run=not a.execute)
+        rows = intraday.liquidate(dry_run=not a.execute)
         for r in rows:
-            print(f"{r['symbol']:<6} held {r['held']:>8,.2f}  resting {r['resting_sell']:>8,.2f}  "
-                  f"uncovered {r['uncovered']:>8,.2f}  {r['status']}")
-        print("every long is covered by a resting sell" if not rows else f"{len(rows)} position(s) needed cover")
+            print(f"{r['symbol']:<6} sell {r['qty']:>8,.0f} sh  ${r['value']:>10,.0f}  {r['status']}")
+        total = sum(r["value"] for r in rows)
+        print(f"already flat, nothing to sell" if not rows
+              else f"{len(rows)} position(s), ${total:,.0f} sold to cash")
+        left = [r for r in intraday.liquidate(dry_run=True)] if a.execute else []
+        if left:
+            print(f"STILL HELD after selling: {[r['symbol'] for r in left]}")
         return
     p = plan(a.limit, a.spec)
     print(json.dumps({k: p[k] for k in ("nav", "skipped", "halts")}, indent=1, default=str))

@@ -19,7 +19,7 @@ OPENS = dt.datetime(2026, 8, 31, 9, 31, tzinfo=ET)
 CLOSES = dt.datetime(2026, 9, 4, 9, 30, tzinfo=ET)       # the equity snapshot; nothing after this counts
 LAST_CLOSE = dt.datetime(2026, 9, 3, 16, 0, tzinfo=ET)   # last print that can move it, so the last chance to be flat
 ENTRY_UNTIL = dt.time(10, 30)                            # gap fade is an opening trade, never a late one
-FLATTEN_FROM, FLATTEN_UNTIL = dt.time(15, 30), dt.time(15, 55)   # market-on-close cutoff is 15:50
+FLATTEN_FROM, FLATTEN_UNTIL = dt.time(15, 30), dt.time(15, 58)   # a market order still fills this late
 
 
 def now() -> dt.datetime:
