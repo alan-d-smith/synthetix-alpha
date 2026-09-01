@@ -100,6 +100,7 @@ def open_exposure() -> dict:
     """Account snapshot in the shape `live.risk.apply` expects."""
     acct, pos = cli.account(), cli.positions()
     positions = [{"symbol": p["symbol"], "qty": float(p["qty"]), "avg_entry_price": float(p["avg_entry_price"]),
-                  "unrealized_pl": float(p.get("unrealized_pl") or 0)} for p in pos]
+                  "unrealized_pl": float(p.get("unrealized_pl") or 0),
+                  "asset_class": p.get("asset_class", "us_equity")} for p in pos]
     return {"nav": float(acct["equity"]), "cash": float(acct["cash"]), "positions": positions,
             "unprotected": find_missing_brackets(pos, cli.orders("open"))}

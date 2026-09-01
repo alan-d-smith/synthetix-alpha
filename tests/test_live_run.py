@@ -442,3 +442,18 @@ def test_screen_still_works_without_the_chain_table(monkeypatch):
     monkeypatch.setattr(screen, "days_to_earnings",
                         lambda syms, asof=None: pd.Series({"SPY": 90.0}, name="days_to_earnings"))
     assert list(screen.candidates().index) == ["SPY"], "an absent table must not empty the screen"
+
+
+def test_position_limit_counts_only_the_options_book():
+    """The intraday equity basket is flat by the close and has its own budget; it must not consume the
+    options book's twelve slots, which is what locked the options sleeve out after 09:35."""
+    from synthetix_alpha.live import risk
+    equities = [{"symbol": f"S{i}", "qty": 10, "avg_entry_price": 100.0,
+                 "unrealized_pl": 0.0, "asset_class": "us_equity"} for i in range(11)]
+    order = [{"symbol": "VLO", "max_loss": 500.0, "defined_risk": True}]
+    d = risk.apply(order, equities, nav=100000.0)
+    assert not any("HALT ALL" in h for h in d.halts), "equity legs must not exhaust the option slots"
+    options = [{"symbol": f"O{i}", "qty": 1, "avg_entry_price": 3.0,
+                "unrealized_pl": 0.0, "asset_class": "us_option"} for i in range(12)]
+    d2 = risk.apply(order, options, nav=100000.0)
+    assert any("HALT ALL" in h for h in d2.halts), "a full options book must still halt"

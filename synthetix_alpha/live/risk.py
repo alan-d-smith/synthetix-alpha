@@ -66,9 +66,15 @@ def apply(orders: list[dict], positions: list[dict], nav: float, rules: Optional
     if day_pnl < 0 and abs(day_pnl) / nav >= r.max_daily_drawdown_pct:
         return Decision([], [f"HALT ALL: daily drawdown {abs(day_pnl)/nav:.2%} >= {r.max_daily_drawdown_pct:.2%}"])
 
-    slots = r.max_open_positions - len(positions)
+    # The position limit governs the options book. It was written when that was the only book, and the intraday
+    # equity sleeve now fills all twelve slots by 09:35 and locks the options sleeve out for the rest of the day
+    # — despite being flat by the close and carrying its own separate budget.
+    # Anything not explicitly an equity counts, so an unlabelled position tightens the limit rather than
+    # slipping past it. open_exposure always labels; this only decides which way an omission errs.
+    booked = [p for p in positions if str(p.get("asset_class") or "us_option") != "us_equity"]
+    slots = r.max_open_positions - len(booked)
     if slots <= 0:
-        return Decision([], [f"HALT ALL: {len(positions)}/{r.max_open_positions} positions open"])
+        return Decision([], [f"HALT ALL: {len(booked)}/{r.max_open_positions} option positions open"])
 
     remaining_leverage = nav * r.max_leverage - _position_notional(positions)
     for o in orders:
