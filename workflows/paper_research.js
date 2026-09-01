@@ -5,7 +5,14 @@ export const meta = {
 }
 
 // Run `python -m synthetix_alpha.research.loop find` first, then pass its papers as args.papers.
-const REPO = 'C:\\Users\\alan\\PycharmProjects\\synthetix-alpha'
+// Provider-agnostic LLM config. Set OPENAI_BASE_URL / OPENAI_API_KEY / OPENAI_MODEL in .env.
+//   OPENAI_BASE_URL  e.g. https://router.huggingface.co/v1
+//   OPENAI_API_KEY   your Hugging Face token
+//   OPENAI_MODEL     e.g. deepseek-ai/DeepSeek-R1:featherless-ai
+const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || ''
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || ''
+const MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini'
+const REPO = process.cwd()
 const PAPERS = (args && args.papers) || []
 const SPEC_DIR = 'datasets/research/papers/specs'
 
@@ -27,7 +34,44 @@ WHAT IS ALREADY KNOWN (docs/research.md) - do not rediscover:
 Deployed incumbent: strategies/put_vertical_ivrv.json, score +0.520, mean Sharpe 0.92 with the liquidity floor.
 
 Backtest one spec: .venv/Scripts/python -m synthetix_alpha.strategy.run <spec.json>
-Score = 0.5*mean_sharpe + 0.5*min_sharpe + 2*worst_year + 3*max(maxDD,-1) + (positive_years-1); under 40 trades scores -9.`
+Score = 0.5*mean_sharpe + 0.5*min_sharpe + 2*worst_year + 3*max(maxDD,-1) + (positive_years-1); under 40 trades scores -9.
+
+## Few-Shot Examples
+
+### Example 1 — Valid Spec (put credit spread on SPY from variance-risk-premium paper)
+
+{
+  "name": "paper_2301_12345_vrp_put_spread",
+  "legs": [
+    {"type": "put", "side": "short", "delta": 0.20, "ratio": 1},
+    {"type": "put", "side": "long", "delta": 0.10, "ratio": 1}
+  ],
+  "underlyings": ["SPY"],
+  "dte_target": 45,
+  "dte_min": 30,
+  "dte_max": 60,
+  "entry_every_days": 1,
+  "max_positions": 4,
+  "signal": {"iv_rv_ratio": [1.27, null], "vix_rv_ratio": [1.4, null]},
+  "profit_target": 0.75,
+  "stop_loss": 2.0,
+  "dte_exit": 14,
+  "risk_fraction": 0.03,
+  "sizing": "max_loss",
+  "source": "arXiv:2301.12345 Variance Risk Premium in Option Markets"
+}
+
+### Example 2 — Unusable Paper (needs intraday data the engine lacks)
+
+When a paper requires intraday signals or tick-level data that the engine cannot express, return:
+{
+  "arxiv_id": "2301.99999",
+  "usable": false,
+  "summary": "The paper proposes a high-frequency delta-hedging strategy requiring sub-minute option quotes.",
+  "specs": [],
+  "missing_primitives": ["intraday option bars", "tick-level bid/ask data", "real-time delta hedging"],
+  "engine_issues": "Requires intraday data resolution not available in current EOD chain engine."
+}`
 
 const RESULT = {
   type: 'object', required: ['arxiv_id', 'usable', 'summary', 'specs', 'missing_primitives'],

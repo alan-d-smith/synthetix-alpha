@@ -36,9 +36,9 @@ def test_llm_mock_structured() -> None:
     llm = LLMClient(mock=True)
     d = llm.complete_structured("sys", "user", CriticDecision)
     assert isinstance(d, CriticDecision)
-    assert d.decision
+    assert d.decision in ("APPROVED", "REJECTED")
     assert 1 <= d.confidence <= 100
-    assert 0.5 <= d.suggested_size_multiplier <= 1.0
+    assert d.suggested_size_multiplier in (0.5, 0.75, 1.0)
 
 
 def test_llm_strip_json_plain() -> None:
@@ -114,6 +114,27 @@ def test_critic_decision_bounds() -> None:
         CriticDecision(ticker="X", confidence=101)
     with pytest.raises(Exception):
         CriticDecision(ticker="X", suggested_size_multiplier=0.4)
+    with pytest.raises(Exception):
+        CriticDecision(ticker="X", suggested_size_multiplier=0.6)
+    with pytest.raises(Exception):
+        CriticDecision(ticker="X", suggested_size_multiplier=0.8)
+    with pytest.raises(Exception):
+        CriticDecision(ticker="X", decision="PENDING")  # not a Literal option
+
+
+def test_critic_decision_discrete_multipliers() -> None:
+    """Only 0.5, 0.75, and 1.0 are valid size multipliers."""
+    for v in (0.5, 0.75, 1.0):
+        d = CriticDecision(ticker="SPY", suggested_size_multiplier=v)
+        assert d.suggested_size_multiplier == v
+
+
+def test_critic_decision_valid_decisions() -> None:
+    """APPROVED and REJECTED are the only valid decision strings."""
+    d1 = CriticDecision(ticker="X", decision="APPROVED")
+    assert d1.decision == "APPROVED"
+    d2 = CriticDecision(ticker="X", decision="REJECTED")
+    assert d2.decision == "REJECTED"
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +164,40 @@ def test_critic_agent_mock_batch() -> None:
     results = critic.evaluate_batch(inputs)
     assert len(results) == 2
     assert all(isinstance(d, CriticDecision) for d in results)
+
+
+def test_critic_agent_mock_batch_consistency() -> None:
+    """Ensemble voting with mock LLM: all 3 runs return identical structured output."""
+    llm = LLMClient(mock=True)
+    critic = CriticAgent(llm=llm)
+    inp = CriticInput(ticker="SPY", iv=0.30, hv=0.20, iv_rv=1.5, iv_rank=0.85)
+    results = critic.evaluate_batch([inp], consistency=True)
+    assert len(results) == 1
+    assert results[0].decision in ("APPROVED", "REJECTED")
+    assert 1 <= results[0].confidence <= 100
+    assert results[0].suggested_size_multiplier in (0.5, 0.75, 1.0)
+
+
+def test_critic_evaluate_with_consistency() -> None:
+    """Single input through ensemble voting: should return a valid CriticDecision."""
+    llm = LLMClient(mock=True)
+    critic = CriticAgent(llm=llm)
+    inp = CriticInput(
+        ticker="SPY", iv=0.35, hv=0.22, iv_rv=1.59, iv_rank=0.88,
+        yield_curve=0.10, hy_spread=3.0, nfci=-0.2,
+    )
+    d = critic.evaluate_with_consistency(inp)
+    assert isinstance(d, CriticDecision)
+    assert d.ticker == "SPY"
+    assert d.decision in ("APPROVED", "REJECTED")
+    assert 1 <= d.confidence <= 100
+    assert d.suggested_size_multiplier in (0.5, 0.75, 1.0)
+
+
+def test_llm_seed_parameter() -> None:
+    """LLMClient accepts and stores a seed parameter."""
+    llm = LLMClient(mock=True, seed=12345)
+    assert llm._seed == 12345
 
 
 # ---------------------------------------------------------------------------
