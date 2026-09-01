@@ -35,6 +35,9 @@ class LLMClient:
     mock : bool
         If ``True``, bypass the API and return deterministic structured
         output.  Also auto-enabled when no API key is available.
+    seed : int
+        Fixed random seed passed to the API for reproducible outputs.
+        Defaults to 42.
     """
 
     def __init__(
@@ -44,14 +47,16 @@ class LLMClient:
         model: Optional[str] = None,
         *,
         mock: bool = False,
+        seed: int = 42,
     ) -> None:
         self._api_key = api_key or os.environ.get("OPENAI_API_KEY")
         self._base_url = base_url or os.environ.get("OPENAI_BASE_URL")
-        self._model = model or os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+        self._model = model or os.environ.get("OPENAI_MODEL")
         self._mock = mock or not self._api_key
+        self._seed = seed
         self._client: object = None
         if self._mock:
-            logger.debug("LLMClient running in mock mode")
+            logger.debug("LLMClient running in mock mode (seed=%d)", self._seed)
     def _openai(self) -> object:
         if self._client is None:
             from openai import OpenAI
@@ -88,13 +93,17 @@ class LLMClient:
                 )
                 time.sleep(delay)
         raise LLMAPIError("unreachable") from last_exc
-    def complete(self, system_prompt, user_prompt, *, temperature=0.2):
+    def complete(self, system_prompt, user_prompt, *, temperature=0.0):
         if self._mock:
             return f"MOCK: system={system_prompt[:80]}... user={user_prompt[:80]}..."
+        if self._model is None: raise ValueError("No model specified. Pass model= to LLMClient, set OPENAI_MODEL in .env, or set OPENAI_BASE_URL.")
         def _call():
             c = self._openai()
             r = c.chat.completions.create(
-                model=self._model, temperature=temperature,
+                model=self._model,
+                temperature=0.0,
+                top_p=0.1,
+                seed=self._seed,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
@@ -103,7 +112,7 @@ class LLMClient:
             return r.choices[0].message.content or ""
         return self._retry_loop(_call)
 
-    def complete_structured(self, system_prompt, user_prompt, schema, *, temperature=0.2):
+    def complete_structured(self, system_prompt, user_prompt, schema, *, temperature=0.0):
         if self._mock:
             return self._mock_structured(schema)
         aug = (f"{system_prompt}\n\nYou MUST respond with ONLY a valid JSON "
@@ -111,7 +120,7 @@ class LLMClient:
                "text outside the JSON object.")
         for attempt in range(_MAX_RETRIES + 1):
             try:
-                raw = self.complete(aug, user_prompt, temperature=temperature)
+                raw = self.complete(aug, user_prompt, temperature=0.0)
                 return schema.model_validate_json(self._strip_json(raw))
             except (json.JSONDecodeError, ValueError) as exc:
                 if attempt == _MAX_RETRIES:
