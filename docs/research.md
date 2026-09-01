@@ -1211,26 +1211,51 @@ bind; and `ordering=-date` works while `sort` and `order_by` are ignored, which 
 OptionMetrics ends 2025-08-29 and CRSP daily 2024-12-31 (`dsf_v2` runs to 2025-12-31), so **nothing here can reach
 the order path** — it is a research instrument, not a data feed.
 
-### The gap fade is not factor exposure
+### The look-ahead that inflated everything
 
-Regressing 1,205 sessions of daily returns on Fama-French five factors plus momentum, and then on reversal
-portfolios built from our own universe over the same open-to-close window:
+Found while testing basket weighting, which forced every input to be lagged properly. `zgap` divided the overnight
+gap by a 20-day volatility whose window **ended on today's row**, and that row's close is the full session close.
+The bias is self-fulfilling: a name that gaps down and then recovers posts a small close-to-close move, contributes
+little to its own volatility, shrinks its own denominator, and so ranks *higher* — the ranking was reading the
+outcome it exists to predict.
 
-| model | alpha | t |
-|---|---|---|
-| FF3 + momentum | 16.12% | 2.81 |
-| FF5 + momentum | 16.31% | 2.85 |
-| FF5 + momentum + 1-day and 21-day reversal | **16.76%** | **2.95** |
+| z-gap denominator | annual | Sharpe | max DD |
+|---|---|---|---|
+| as originally written (uses today's close) | 41.28% | 2.33 | −14.5% |
+| **as live actually sees it** (19 closes + today's gap) | **15.57%** | **0.84** | −18.2% |
+| fully lagged (window ends yesterday) | 15.86% | 0.85 | −17.4% |
 
-Market beta is 0.508 and highly significant, so a third of the variance is simply being long equities — over a
-four-day window the market matters more than the alpha does. The reversal loadings are real (str21 +0.068, t 3.15)
-but correlations are only 0.10 and 0.18, so this is not a repackaged reversal anomaly. One caveat against our own
-result: both reversal portfolios lost money over the window, so controlling for them cannot subtract much.
+**The live sleeve never had the information** — `panels` fetches a part-formed bar at 09:31 whose close is the
+current price — so the deployment was always honest and only the backtest was flattered. `zgap` now stands today's
+gap in for today's return, which makes both agree by construction; `test_zgap_denominator_cannot_see_todays_close`
+fails if it ever leaks back.
 
-Fama-MacBeth on 1,234 daily cross-sections is the stronger evidence. The z-gap coefficient is **−0.00140, t = −7.92**
-alone and **t = −8.26** once yesterday's open-to-close return is added, while that prior return contributes nothing
-(t −0.60) and its second lag nothing at all (t +0.01). Heston-Korajczyk-Sadka periodicity (arXiv:1005.3535) is real
-at half-hourly intervals but does not operate at the interval this sleeve trades.
+Out-of-sample testing did not catch this, and could not have: the bias is present identically in both periods, so
+it replicated perfectly while being wrong throughout. The tell was the number itself — Sharpe above 2 on a simple
+daily reversal rule in liquid large caps is not something found by accident.
+
+### Corrected: the gap fade is mostly market exposure
+
+Everything below is recomputed with the look-ahead removed.
+
+| basket | annual | Sharpe | max DD |
+|---|---|---|---|
+| n=5 | 17.91% | 0.81 | −19.4% |
+| **n=10** | **15.63%** | **0.84** | −18.2% |
+| n=20 | 10.90% | 0.68 | −14.4% |
+| n=30 | 10.43% | 0.70 | −14.0% |
+
+Against FF5 + momentum + same-universe reversal over 1,190 sessions, alpha is **3.13%, t = 0.43** — was 16.76% at
+t 2.95 before the fix. Market beta rises to 0.592. What remains, after the artefact, is mostly being long equities.
+
+The signal itself survives, weakened. Fama-MacBeth on 1,234 daily cross-sections gives a z-gap coefficient of
+**−0.00065, t = −3.52**, against −0.00140 at t −7.92 before. The gap does predict intraday reversion; it is about
+half as strong as believed and most of the return is market exposure rather than edge.
+
+The basket-size case also collapses: n=10 over n=20 falls from +14.82pp at t 5.22 to **+4.73pp at t 1.67**, with
+neither sub-period significant, and monotonicity breaks (n=30 now out-Sharpes n=20). Hedging market beta no longer
+helps either — Sharpe 0.84 unhedged against 0.81 and 0.77 at 0.3x and 0.5x SPY — it only looked good because the
+numerator was inflated. Heston-Korajczyk-Sadka periodicity (arXiv:1005.3535) adds nothing at this interval either.
 
 ### The IV/RV gate is not supported
 
@@ -1254,7 +1279,7 @@ anything (+6.72p, NW t 4.04) across 106 of 858 days, which is a far rarer condit
 CRSP `dsf_v2` closing quotes across the traded universe: median spread **1.72bp**, mean 2.41bp, 90th percentile
 5.25bp, ranging from SPY at 0.20bp to REGN at 12.14bp. The flat 3bp charged in backtests is therefore conservative,
 and `intraday.backtest` now charges each name its own measured spread from `datasets/quoted_spreads.csv`. The gap
-fade nets **41.34% at Sharpe 2.34** for n=10 against 46.99% gross.
+fade nets **15.63% at Sharpe 0.84** for n=10 once the look-ahead above is also removed.
 
 Excluding wide-spread names makes it monotonically worse — n=10 falls 41.33% → 39.00% → 33.26% → 25.24% as the
 widest 9%, 25% and 50% are dropped. The wide names carry more signal than their spread costs, which is the universe's

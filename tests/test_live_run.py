@@ -457,3 +457,20 @@ def test_position_limit_counts_only_the_options_book():
                 "unrealized_pl": 0.0, "asset_class": "us_option"} for i in range(12)]
     d2 = risk.apply(order, options, nav=100000.0)
     assert any("HALT ALL" in h for h in d2.halts), "a full options book must still halt"
+
+
+def test_zgap_denominator_cannot_see_todays_close():
+    """The ranking must not read the outcome it predicts. Two names with identical histories and identical
+    gaps must rank identically, whatever the rest of the session does to them."""
+    import numpy as np
+    import pandas as pd
+    from synthetix_alpha.live import intraday
+    idx = pd.date_range("2024-01-01", periods=40).date
+    rng = np.random.default_rng(7)
+    hist = 100 * np.cumprod(1 + rng.normal(0, 0.01, 40))
+    cl = pd.DataFrame({"RECOVERS": hist.copy(), "KEEPS_FALLING": hist.copy()}, index=idx)
+    op = cl.shift(1) * 0.95                      # both gap down 5% on every day
+    cl.iloc[-1] = [op.iloc[-1, 0] * 1.06, op.iloc[-1, 1] * 0.94]   # one rallies, one slides
+    z = intraday.zgap(op, cl).iloc[-1]
+    assert z["RECOVERS"] == pytest.approx(z["KEEPS_FALLING"], rel=1e-9), \
+        "today's close leaked into the ranking"

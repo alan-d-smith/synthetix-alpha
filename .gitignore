@@ -222,6 +222,10 @@ __marimo__/
 datasets/*
 !datasets/VIXCLS.parquet
 !datasets/VXNCLS.parquet
+# Small measured tables the live code reads: without these the spread and chain filters silently no-op.
+!datasets/quoted_spreads.csv
+!datasets/option_liquidity.csv
+!datasets/gapfade_daily_returns.parquet
 datasets/papers/
 !datasets/options/.gitkeep
 

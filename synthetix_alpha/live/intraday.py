@@ -47,8 +47,20 @@ def panels(client, days: int = 1825, symbols: Optional[list[str]] = None) -> tup
 
 
 def zgap(op: pd.DataFrame, cl: pd.DataFrame, window: int = 20) -> pd.DataFrame:
-    """Overnight gap divided by the name's own daily volatility, so names are comparable."""
-    return (op / cl.shift(1) - 1) / cl.pct_change().rolling(window).std()
+    """Overnight gap divided by the name's own daily volatility, so names are comparable.
+
+    The volatility window ends before today's close, standing today's gap in for today's return. Including
+    today's close made the ranking read the outcome it exists to predict: a name that gapped down and then
+    recovered posts a small close-to-close move, shrinks its own denominator, and so ranks higher precisely
+    because it recovered. That inflated the backtest from Sharpe 0.84 to 2.33 while live, where the bar is
+    only part-formed at 09:31, never had the information. Now both see the same number.
+    """
+    gap = op / cl.shift(1) - 1
+    prior = cl.pct_change().shift(1)
+    s1 = prior.rolling(window - 1).sum() + gap
+    s2 = (prior ** 2).rolling(window - 1).sum() + gap ** 2
+    var = (s2 - s1 ** 2 / window) / (window - 1)
+    return gap / np.sqrt(var.clip(lower=0)).replace(0.0, np.nan)
 
 
 def spreads() -> pd.Series:
