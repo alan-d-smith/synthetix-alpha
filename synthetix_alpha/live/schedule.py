@@ -40,10 +40,10 @@ FLATTEN = (dt.time(15, 50), dt.time(15, 56))
 # regime; deployed runs the actual strategy at 150% with the volatility gate off (~40%), giving up some
 # probability for a materially better tail. See docs/research.md.
 BOOKS = [
-    # Research banked Wednesday's gain in cash and trades the strategy at its designed size from here: the
-    # levered index long did its job for one session and is not worth carrying, since its edge over the gap
-    # fade is about $40 of expected return against thousands of dollars of swing.
-    ("research n=10 @60%", "research", ["--intraday-top", "10", "--intraday-budget", "0.60", "--vol-gate", "0"]),
+    # Both books run the same thing for the last session, sized for expected P&L. n=10 is the best vehicle
+    # available: +0.034% per session in the current calm regime, half again SPY's expected return per dollar
+    # invested. Expected return then scales with exposure, so 150% is the size and the gate stays off.
+    ("research n=10 @150%", "research", ["--intraday-top", "10", "--intraday-budget", "1.50", "--vol-gate", "0"]),
     ("deployed n=10 @150%", "deployed", ["--intraday-top", "10", "--intraday-budget", "1.50", "--vol-gate", "0"]),
 ]
 
