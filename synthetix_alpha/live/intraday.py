@@ -35,12 +35,19 @@ UNIVERSE = ["AAPL", "ABBV", "ABT", "ACN", "ADBE", "ADI", "ADP", "AIG", "ALL", "A
             "ROP", "ROST", "RTX", "SBUX", "SCHW", "SHW", "SLB", "SNPS", "SO", "SPGI", "SPY", "SRE", "STZ", "SYK",
             "T", "TFC", "TGT", "TJX", "TMO", "TMUS", "TRV", "TSLA", "TT", "TXN", "UNH", "UNP", "UPS", "USB", "V",
             "VLO", "VRTX", "VZ", "WBA", "WELL", "WFC", "WM", "WMB", "WMT", "XEL", "XOM", "YUM", "ZTS"]
+MAX_GAP = 0.25
+BUSTED = [dt.date(2023, 1, 24)]
 
 
 def panels(client, days: int = 1825, symbols: Optional[list[str]] = None) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Open and close price panels indexed by date, columns by symbol."""
+    """Open and close price panels indexed by date, columns by symbol.
+
+    Split-adjusted: on raw bars a 10-for-1 split reads as a 90% gap-down and takes the top slot for a day
+    (NVDA 2024-06-10, MNST 2026-08-11), so the basket held a name with no signal in it.
+    """
     end = dt.date.today()
-    b = client.stock_bars(symbols or UNIVERSE, "1Day", end - dt.timedelta(days=days), end).reset_index()
+    b = client.stock_bars(symbols or UNIVERSE, "1Day", end - dt.timedelta(days=days), end,
+                          adjustment="split").reset_index()
     b["date"] = pd.to_datetime(b["timestamp"] if "timestamp" in b else b.iloc[:, 0]).dt.date
     return (b.pivot_table(index="date", columns="symbol", values="open"),
             b.pivot_table(index="date", columns="symbol", values="close"))
@@ -82,6 +89,11 @@ def backtest(client, n: int = 20, days: int = 1825, hedge: bool = False, net: bo
     than a flat rate; pass net=False for the gross series.
     """
     op, cl = panels(client, days)
+    # Two defects in the daily bars that a top-ten selection is built to find. Bars whose open is a copy of the
+    # close (839 name-days) rank on a gap that never printed; and 2023-01-24, when the NYSE opening auction
+    # failed, carries prints that were busted, worth +12.6% to the basket that no order could have earned.
+    op = op.mask(op == cl).drop(index=BUSTED, errors="ignore")
+    cl = cl.drop(index=BUSTED, errors="ignore")
     day = cl / op - 1
     held = zgap(op, cl).rank(axis=1, ascending=True) <= n
     r = day.where(held).mean(axis=1)
@@ -118,7 +130,10 @@ def rank_today(client, n: int = 20, days: int = 60, require_fresh: bool = True) 
     z = zgap(op, cl).iloc[-1].dropna().sort_values()
     today, prev = op.index[-1], cl.index[-2]
     gap = (op.loc[today] / cl.loc[prev] - 1).reindex(z.index)
-    return pd.DataFrame({"open": op.loc[today].reindex(z.index), "gap": gap, "z": z}).head(n)
+    # A large cap does not open a quarter lower on anything the fade can trade. It is a corporate action the
+    # feed has not adjusted yet (a split effective today, a spin-off) or a collapse; the five in the sample averaged -5%.
+    z = z[gap.abs() <= MAX_GAP]
+    return pd.DataFrame({"open": op.loc[today].reindex(z.index), "gap": gap.reindex(z.index), "z": z}).head(n)
 
 
 def vol_regime(client, lookback: int = 400) -> float:

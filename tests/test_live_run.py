@@ -93,6 +93,23 @@ def test_gap_fade_ranks_by_volatility_adjusted_gap(monkeypatch):
     assert any("cls" in a for a in sent), "exit must be market-on-close so the sleeve never holds overnight"
 
 
+def test_rank_today_skips_unadjusted_splits(monkeypatch):
+    import numpy as np
+    import pandas as pd
+    from synthetix_alpha.live import intraday
+    from zoneinfo import ZoneInfo
+    today = dt.datetime.now(ZoneInfo("America/New_York")).date()
+    idx = [today - dt.timedelta(days=29 - i) for i in range(30)]
+    rng = np.random.default_rng(1)
+    cl = pd.DataFrame({s: 100 + rng.normal(0, 1.0, 30).cumsum() for s in "ABC"}, index=idx)
+    op = cl.shift(1) * 1.001
+    op.iloc[0] = cl.iloc[0]
+    op.iloc[-1] = cl.iloc[-2] * [0.5, 0.98, 0.99]     # A "gaps" 50%: a 2-for-1 split the feed has not applied
+    monkeypatch.setattr(intraday, "panels", lambda *a, **k: (op, cl))
+    picks = intraday.rank_today(object(), n=3)
+    assert list(picks.index) == ["B", "C"], "a split-sized gap is a corporate action, not a signal"
+
+
 def test_rank_today_needs_history_for_volatility(monkeypatch):
     import pandas as pd
     from synthetix_alpha.live import intraday
