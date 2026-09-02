@@ -530,3 +530,30 @@ def test_vol_gate_blocks_the_sleeve_in_calm_markets(monkeypatch, capsys):
     live_run.main()
     assert planned == [], "the sleeve must not even build a plan below the gate"
     assert "standing aside" in capsys.readouterr().out
+
+
+def test_index_plan_respects_buying_power():
+    """Four times NAV exceeds what the account can actually borrow once the price moves, so the order has
+    to be sized off buying power, not off the leverage number."""
+    import pandas as pd
+    from synthetix_alpha.live import intraday
+
+    class C:
+        def stock_bars(self, *a, **k):
+            return pd.DataFrame({"close": [100.0]}, index=[0])
+
+    unconstrained = intraday.index_plan(100_000.0, C(), "SPY", 4.0)
+    assert unconstrained[0]["qty"] == 4000, "without a limit it sizes to 4x NAV"
+    capped = intraday.index_plan(100_000.0, C(), "SPY", 4.0, buying_power=300_000.0)
+    assert capped[0]["qty"] == 2910, "with 300k of buying power it must stop at 97% of it"
+    assert capped[0]["notional"] <= 300_000.0
+
+
+def test_index_plan_declines_when_it_cannot_price():
+    import pandas as pd
+    from synthetix_alpha.live import intraday
+
+    class Empty:
+        def stock_bars(self, *a, **k): return pd.DataFrame()
+
+    assert intraday.index_plan(100_000.0, Empty()) == []
