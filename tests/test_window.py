@@ -84,8 +84,21 @@ def test_both_flatten_passes_are_scheduled_on_the_final_session(tmp_path, monkey
 
 
 def test_scheduler_runs_both_books_on_separate_accounts():
+    """Two accounts, never the same one twice: a mix-up would double the size on one book and leave
+    the other idle."""
     from synthetix_alpha.live import schedule as sc
-    accounts = {a for _, a, _ in sc.BOOKS}
-    baskets = {b for _, _, b in sc.BOOKS}
-    assert accounts == {"research", "deployed"}
-    assert baskets == {10, 20}, "n=10 on research, n=20 on deployed"
+    accounts = [a for _, a, _ in sc.BOOKS]
+    assert sorted(accounts) == ["deployed", "research"]
+    assert len(set(accounts)) == len(accounts), "each account must appear exactly once"
+    for _, _, extra in sc.BOOKS:
+        assert extra, "every book needs its own runner arguments"
+        assert len(extra) % 2 == 0, "runner arguments come in flag/value pairs"
+
+
+def test_scheduler_passes_each_book_its_own_strategy():
+    """The books deliberately run different strategies, so the arguments must not be shared or swapped."""
+    from synthetix_alpha.live import schedule as sc
+    by_account = {a: extra for _, a, extra in sc.BOOKS}
+    assert "--index-long" in by_account["research"], "research runs the levered index long"
+    assert "--index-long" not in by_account["deployed"], "deployed runs the gap fade, not the index"
+    assert "--intraday-budget" in by_account["deployed"]

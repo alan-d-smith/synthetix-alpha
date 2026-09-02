@@ -31,8 +31,18 @@ ENTRY, TOPUP = dt.time(9, 31), dt.time(9, 45)
 # The second pass sells whatever the first missed, and is a no-op once the book is flat.
 FLATTEN = (dt.time(15, 50), dt.time(15, 56))
 
-# (label, account, gap fade basket). The options and crypto sleeves ride along with each entry run.
-BOOKS = [("research n=10", "research", 10), ("deployed n=20", "deployed", 20)]
+# (label, account, extra runner arguments). The options and crypto sleeves ride along with each entry run.
+#
+# The two books now run different strategies for the final sessions. Both are behind the $100k mark with two
+# sessions left, so the objective is the probability of finishing above it rather than risk-adjusted return,
+# and against a target above the mean that favours variance. Research takes the levered index long, which has
+# the higher probability (~47%) because market drift is positive where the gap fade's edge is absent in a calm
+# regime; deployed runs the actual strategy at 150% with the volatility gate off (~40%), giving up some
+# probability for a materially better tail. See docs/research.md.
+BOOKS = [
+    ("research SPY 4x", "research", ["--index-long", "SPY", "--index-leverage", "4.0", "--intraday-top", "1"]),
+    ("deployed n=10 @150%", "deployed", ["--intraday-top", "10", "--intraday-budget", "1.50", "--vol-gate", "0"]),
+]
 
 
 def _state() -> dict:
@@ -49,14 +59,13 @@ def _mark(key: str, value: dict) -> None:
     STATE.write_text(json.dumps(s, indent=1, sort_keys=True))
 
 
-def run_action(action: str, account: str, basket: int, execute: bool) -> dict:
+def run_action(action: str, account: str, extra: list[str], execute: bool) -> dict:
     """Invoke the runner as a subprocess so each account gets a clean process and its own credentials."""
     cmd = [sys.executable, "-m", "synthetix_alpha.live.run", "--account", account]
     if action in ("flatten", "topup"):
         cmd += [f"--{action}"]
     else:
-        cmd += ["--limit", "12", "--intraday-top", str(basket), "--intraday-budget", "0.60",
-                "--crypto-budget", "0.15"]
+        cmd += ["--limit", "12", "--crypto-budget", "0.15"] + list(extra)
     if execute:
         cmd += ["--execute"]
     started = dt.datetime.now(window.ET)
@@ -68,10 +77,10 @@ def run_action(action: str, account: str, basket: int, execute: bool) -> dict:
             "tail": out.strip()[-2000:]}
 
 
-def due(now: dt.datetime) -> list[tuple[str, str, int, str]]:
+def due(now: dt.datetime) -> list[tuple[str, str, list, str]]:
     """Actions whose time has arrived today and which have not already run."""
     today, s, out = now.date().isoformat(), _state(), []
-    for label, account, basket in BOOKS:
+    for label, account, extra in BOOKS:
         timetable = [("enter", ENTRY, "enter"), ("topup", TOPUP, "topup")]
         timetable += [("flatten", at, f"flatten{i}") for i, at in enumerate(FLATTEN)]
         for action, at, name in timetable:
@@ -80,7 +89,7 @@ def due(now: dt.datetime) -> list[tuple[str, str, int, str]]:
                 continue
             gate = window.can_flatten if action == "flatten" else window.can_enter
             if now.time() >= at and gate(now)[0]:
-                out.append((action, account, basket, name))
+                out.append((action, account, extra, name))
     return out
 
 
@@ -97,11 +106,11 @@ def loop(execute: bool, poll: int = 20) -> None:
     # already refuse everything outside the window, so idling past it is inert. Stop it by hand when done.
     while True:
         now = window.now()
-        for action, account, basket, name in due(now):
+        for action, account, extra, name in due(now):
             key = f"{now.date().isoformat()}:{name}:{account}"
             _mark(key, {"started": now.isoformat(), "state": "running"})   # mark first: a crash must not retry
             try:
-                _mark(key, run_action(action, account, basket, execute))
+                _mark(key, run_action(action, account, extra, execute))
             except Exception as e:
                 _mark(key, {"at": now.isoformat(), "error": f"{type(e).__name__}: {e}"})
                 print(f"  {action}/{account} failed: {type(e).__name__}: {e}", flush=True)
