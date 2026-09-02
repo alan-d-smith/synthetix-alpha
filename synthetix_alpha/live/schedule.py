@@ -1,7 +1,7 @@
 """Competition scheduler: fires the runner at fixed times inside the window, once each.
 
-Two books run side by side, a ten-name gap fade basket on the research account and a twenty-name basket on the
-deployed one, so the concentrated and diversified versions are compared on live fills rather than in a backtest.
+The two books run different strategies; see BOOKS below for what each account is configured to do.
+
 
 Every action is recorded in a state file before it runs, so a crash and restart cannot enter twice. The window
 guard in `live.window` is the real safety net; this only decides when to call the runner.
@@ -71,7 +71,7 @@ def run_action(action: str, account: str, extra: list[str], execute: bool) -> di
     started = dt.datetime.now(window.ET)
     p = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
     out = (p.stdout or "") + (p.stderr or "")
-    print(f"\n=== {started:%Y-%m-%d %H:%M:%S} ET | {action} | {account} | basket {basket} | rc {p.returncode} ===")
+    print(chr(10) + f"=== {started:%Y-%m-%d %H:%M:%S} ET | {action} | {account} | rc {p.returncode} ===")
     print(out.strip()[-4000:])
     return {"at": started.isoformat(), "rc": p.returncode, "cmd": " ".join(cmd[2:]),
             "tail": out.strip()[-2000:]}

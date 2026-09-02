@@ -102,3 +102,23 @@ def test_scheduler_passes_each_book_its_own_strategy():
     assert "--index-long" in by_account["research"], "research runs the levered index long"
     assert "--index-long" not in by_account["deployed"], "deployed runs the gap fade, not the index"
     assert "--intraday-budget" in by_account["deployed"]
+
+
+def test_run_action_builds_a_command_without_crashing(monkeypatch):
+    """A NameError in run_action is invisible until the market opens: the scheduler records the failure in
+    the state file, marks the action done, and never retries. Both books lost a session to exactly that."""
+    from synthetix_alpha.live import schedule as sc
+    seen = {}
+
+    class Done:
+        returncode, stdout, stderr = 0, "ok", ""
+
+    def fake(cmd, **kw):
+        seen["cmd"] = cmd
+        return Done()
+    monkeypatch.setattr(sc.subprocess, "run", fake)
+    for _, account, extra in sc.BOOKS:
+        for action in ("enter", "topup", "flatten"):
+            out = sc.run_action(action, account, extra, execute=False)
+            assert out["rc"] == 0 and "error" not in out
+    assert "--account" in seen["cmd"]
