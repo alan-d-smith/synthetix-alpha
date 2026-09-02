@@ -239,3 +239,7 @@ datasets/wallets/
 results/**/*.json
 !results/.gitkeep
 !datasets/volatility_recent.parquet
+frontend/node_modules/
+frontend/.next/
+frontend/.env.local
+frontend/tsconfig.tsbuildinfo

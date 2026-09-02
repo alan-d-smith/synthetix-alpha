@@ -16,7 +16,11 @@ INTENT = {"long": "buy_to_open", "short": "sell_to_open"}
 
 def _env() -> dict:
     key, secret = config.credentials()
-    env = {**os.environ, "ALPACA_API_KEY": key, "ALPACA_SECRET_KEY": secret}
+    # subprocess.run(env=...) replaces the entire child environment; inherit the
+    # current process PATH (e.g. ~/go/bin) before applying Alpaca credentials.
+    env = os.environ.copy()
+    env["ALPACA_API_KEY"] = key
+    env["ALPACA_SECRET_KEY"] = secret
     env.pop("ALPACA_LIVE_TRADE", None)  # paper is the CLI default; never let the environment opt into live
     return env
 

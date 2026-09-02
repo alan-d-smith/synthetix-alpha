@@ -167,7 +167,7 @@ class LLMClient:
             if origin and "Literal" in str(origin):
                 kw[name] = args[0] if args else "MOCK"
             elif ftype is int or (origin is int):
-                kw[name] = (lo + hi) // 2
+                kw[name] = 85 if name == "confidence" else (lo + hi) // 2
             elif ftype is float or (origin is float):
                 flo = 0.5
                 fhi = 1.0

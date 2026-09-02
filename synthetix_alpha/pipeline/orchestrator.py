@@ -215,6 +215,7 @@ class PipelineOrchestrator:
                 )
             except Exception as exc:
                 result.errors.append(f"EXECUTE: {exc}")
+        return result
 # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
@@ -299,6 +300,8 @@ class PipelineOrchestrator:
                 inputs.append(inp)
             except Exception as exc:
                 result.errors.append(f"GATHER {ticker}: {exc}")
+        return inputs
+
     def _form_orders(
         self,
         approved: list[CriticDecision],
