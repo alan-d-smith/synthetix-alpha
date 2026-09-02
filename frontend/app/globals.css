@@ -1,0 +1,166 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Instrument+Sans:wdth,wght@75..100,400..700&family=Inter:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --canvas: #090B10;
+  --surface-1: #0E1219;
+  --surface-2: #141A24;
+  --surface-hover: #18202B;
+  --border-subtle: #252D3A;
+  --border-strong: #323B4B;
+  --text-primary: #F0F4F8;
+  --text-secondary: #A8B2C1;
+  --text-muted: #707C8E;
+  --data-cyan: #4CC9E9;
+  --data-violet: #9384FF;
+  --positive: #59C58B;
+  --negative: #EF6B72;
+  --warning: #E5B45B;
+  --grid-line: rgba(76, 201, 233, 0.045);
+  --z-sticky: 120;
+  --z-backdrop: 520;
+  --z-dialog: 640;
+  --z-sheet: 720;
+  --z-command: 820;
+  --z-toast: 920;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --chart-background: transparent;
+  --chart-foreground: var(--text-primary);
+  --chart-foreground-muted: var(--text-muted);
+  --chart-label: var(--text-muted);
+  --chart-line-primary: var(--data-cyan);
+  --chart-line-secondary: var(--data-violet);
+  --chart-crosshair: color-mix(in srgb, var(--text-muted) 80%, transparent);
+  --chart-grid: color-mix(in srgb, var(--border-subtle) 55%, transparent);
+  --chart-indicator-color: var(--data-cyan);
+  --chart-indicator-secondary-color: var(--data-violet);
+  --chart-marker-background: var(--surface-2);
+  --chart-marker-border: var(--border-strong);
+  --chart-marker-foreground: var(--text-primary);
+  --chart-marker-badge-background: var(--surface-2);
+  --chart-marker-badge-foreground: var(--text-secondary);
+  --chart-segment-background: color-mix(in srgb, var(--data-cyan) 8%, transparent);
+  --chart-segment-line: var(--data-cyan);
+  --chart-brush-border: var(--border-strong);
+  --chart-tooltip-background: var(--surface-2);
+  --chart-tooltip-foreground: var(--text-primary);
+  --chart-tooltip-muted: var(--text-muted);
+  --chart-1: var(--data-cyan);
+  --chart-2: var(--data-violet);
+  --chart-3: var(--positive);
+  --chart-4: var(--negative);
+  --chart-5: var(--warning);
+}
+
+* { border-color: var(--border-subtle); }
+
+html {
+  background: var(--canvas);
+  color: var(--text-primary);
+  scrollbar-color: #3a4658 var(--canvas);
+  scrollbar-width: thin;
+}
+
+body {
+  min-height: 100vh;
+  background: var(--canvas);
+  font-family: Inter, sans-serif;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.market-canvas {
+  min-height: 100vh;
+  background:
+    radial-gradient(1200px 520px at 12% -8%, rgba(76, 201, 233, 0.05), transparent 58%),
+    radial-gradient(880px 420px at 94% -4%, rgba(147, 132, 255, 0.035), transparent 50%),
+    var(--canvas);
+}
+
+.market-canvas::before {
+  content: "";
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at 48% 12%, black 8%, transparent 72%);
+}
+
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: var(--canvas); }
+*::-webkit-scrollbar-thumb { background: #354154; border: 3px solid var(--canvas); border-radius: 10px; }
+*::-webkit-scrollbar-thumb:hover { background: #566378; }
+::selection { background: color-mix(in srgb, var(--data-cyan) 28%, transparent); color: var(--text-primary); }
+
+@layer base {
+  button, a, input { -webkit-tap-highlight-color: transparent; }
+  button:focus-visible,
+  a:focus-visible,
+  input:focus-visible,
+  table:focus-visible {
+    outline: 2px solid var(--data-cyan);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 4px var(--canvas);
+  }
+}
+
+@layer components {
+  .panel {
+    @apply rounded-panel border bg-surface;
+    background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.012), transparent 40%);
+  }
+  .eyebrow { @apply text-[11px] font-medium uppercase tracking-[0.12em] text-muted; }
+  .mono { @apply font-mono tabular-nums; }
+  .metric-line { @apply flex min-w-0 flex-col gap-1 border-r border-subtle px-5 last:border-r-0 first:pl-0; }
+  .metric-label { @apply text-[11px] font-medium uppercase tracking-[0.1em] text-muted; }
+  .metric-value { @apply font-mono text-[22px] font-medium leading-[26px] tracking-[-0.04em] text-foreground tabular-nums; }
+  .status-dot { @apply inline-block h-1.5 w-1.5 rounded-full; }
+  .table-shell { @apply overflow-x-auto; scrollbar-gutter: stable; }
+  .table-head { @apply sticky top-0 z-10 bg-surface text-left text-[11px] font-medium uppercase leading-4 tracking-[0.1em] text-muted; }
+  .table-row { @apply border-b border-subtle transition-colors duration-160 hover:bg-surface-hover; }
+  .table-row[aria-selected="true"] { @apply bg-surface-hover; }
+  .chart-tooltip { @apply rounded-control border border-strong bg-raised px-3 py-2 font-mono text-[11px] shadow-overlay; }
+  .page-title { @apply font-display text-2xl font-semibold leading-[30px] tracking-[-0.04em]; }
+  .section-title { @apply font-display text-base font-semibold leading-[22px]; }
+}
+
+@keyframes sx-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes sx-sheet-in {
+  from { transform: translateX(16px); opacity: 0.78; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes sx-reveal {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes sx-rail-fill {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+.sx-overlay { animation: sx-overlay-in 160ms var(--ease-out); }
+.sx-sheet { animation: sx-sheet-in 200ms var(--ease-out); }
+.sx-reveal { animation: sx-reveal 180ms var(--ease-out) both; }
+.sx-rail-fill { transform-origin: left; animation: sx-rail-fill 700ms var(--ease-out) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .sx-overlay, .sx-sheet, .sx-reveal, .sx-rail-fill { animation: none; }
+}

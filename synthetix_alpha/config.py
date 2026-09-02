@@ -20,6 +20,9 @@ def _alpaca_bin() -> str:
     found = shutil.which("alpaca")
     if found:
         return found
+    go_bin = Path.home() / "go" / "bin" / "alpaca"
+    if go_bin.exists():
+        return str(go_bin)
     for name in ("alpaca.exe", "alpaca"):        # vendored next to the repo, Windows or Linux
         candidate = ROOT / "tools" / name
         if candidate.exists():
