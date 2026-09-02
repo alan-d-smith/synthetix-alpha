@@ -1245,6 +1245,8 @@ Everything below is recomputed with the look-ahead removed.
 | n=20 | 10.90% | 0.68 | −14.4% |
 | n=30 | 10.43% | 0.70 | −14.0% |
 
+*These still carry the daily-bar defects and the opening-print artefact; see "Where the edge actually was" at the end.*
+
 Against FF5 + momentum + same-universe reversal over 1,190 sessions, alpha is **3.13%, t = 0.43** — was 16.76% at
 t 2.95 before the fix. Market beta rises to 0.592. What remains, after the artefact, is mostly being long equities.
 
@@ -1329,3 +1331,98 @@ A third near-miss is worth recording as method. Splitting gap-downs by *today's*
 light-volume tercile returned +63.8% against −62.3% for the heavy. It was the same look-ahead as the z-gap bug:
 a name that slides all day trades heavily, one that quietly recovers does not, so today's volume encodes the
 outcome. Using *yesterday's* volume the spread collapses to 12.8% against 8.8%, against a 10.4% baseline — nothing.
+
+## Where the edge actually was
+
+*2026-09-02, the evening before the last session. Supersedes every gap-fade number above.*
+
+Two of the universe-width tests needed a data source that had the bars, so the sleeve's history was rebuilt from
+London Strategic Edge 30-minute candles for 1,207 names and reconciled against Alpaca. The reconciliation found
+more than it was looking for.
+
+### Defects in the daily bars the ranking was built on
+
+A top-ten selection from 198 names is a machine for finding bad prints, and both feeds had them.
+
+- **LSE daily bars span 04:00–20:00 ET.** Their open is the first pre-market print, so a wide-universe gap fade on
+  them returned +1,206%/yr. Session prices have to come from the 30m bars: the 09:30 bar's open is the bell, the
+  15:30 bar's close is the last regular trade.
+- **Alpaca has 839 name-days whose open is a copy of the close**, which rank on a gap that never printed, and
+  carries the busted prints of 2023-01-24, when the NYSE opening auction failed — worth +12.6% to the basket in one
+  day that no order could have earned. `backtest()` now masks both.
+- **Raw bars read a split as a −90% gap** and put the name in the top slot (NVDA 2024-06-10, MNST 2026-08-11);
+  `panels` pulls split-adjusted bars, and `MAX_GAP` refuses a gap beyond 25% live, since Alpaca only adjusts a
+  split once its ex-date has passed and APH splits on the last session.
+- **The two feeds disagree on spin-offs** (BDX, GE, FDX, MMM, DHR, T): one adjusts history, the other does not,
+  leaving level shifts of 5–25% that poison any leg measured across feeds. Every comparison below prices its legs
+  on one feed.
+
+With the daily-bar defects removed the honest incumbent is **4.6bp/day, Sharpe 0.65, t 1.45, 11.6%/yr** — not the
+15.63% / 0.84 tabled under "Corrected" above.
+
+### A wider universe does not help
+
+On session bars, the same rule on the top 250 / 500 / 1,000 names by dollar volume (ADV > $20M, price > $5):
+
+| universe | bp/day | Sharpe | t | max DD | vs incumbent, paired t |
+|---|---|---|---|---|---|
+| current 198 names | 5.5 | 0.79 | 1.73 | −17% | — |
+| top 250 | −0.1 | −0.01 | −0.03 | −45% | −1.98 |
+| top 500 | 4.4 | 0.41 | 0.90 | −45% | −0.30 |
+| top 1,000 | 4.3 | 0.37 | 0.82 | −52% | −0.28 |
+
+Breadth buys single names that fall 30–50% intraday (WAL 2023-03-13, GL 2024-04-11); the drawdowns triple and the
+mean does not move. The universe stays.
+
+### The edge was the opening print's own noise
+
+The LSE 09:30 bar's open matches Alpaca's official open on only half of name-days, and the same rule earned
++2.6bp/day more on LSE opens than on Alpaca opens (paired t 3.1) — ranking on a noisy open buys its own noise.
+That raised the question of whether the Alpaca open has the same property. Alpaca 1-minute bars for every name-day
+the rule selected answer it. The basket's path through the session, equal weight, 1,233 sessions:
+
+| leg | bp/day | t |
+|---|---|---|
+| official open → 09:31 print | **+5.0** | **+7.6** |
+| 09:31 → 10:00 | +0.1 | +0.05 |
+| 10:00 → 15:50 | +1.1 | +0.4 |
+| 15:50 → close | +0.2 | +0.4 |
+
+Every basis point is in the first minute. A market order at 09:31 — the earliest the runner can act, and in practice
+it submits at 09:32–09:36 behind the options screen and fills 09:33–09:37 — meets none of it:
+
+| entry → exit | bp/day | Sharpe | t | t (2026) |
+|---|---|---|---|---|
+| official open → official close (the backtest) | +3.8 | 0.55 | 1.21 | 0.31 |
+| 09:31 print → 15:50 (the live rule) | **−1.6** | −0.23 | −0.50 | −0.46 |
+| 09:35 → 15:50 (the actual fills) | −2.0 | −0.31 | −0.70 | −0.43 |
+| 09:31 → 10:00 | −2.9 | −0.80 | −1.76 | −0.50 |
+
+Whether the first minute is a real overshoot of the auction or selection noise is testable: select on the LSE open,
+an independent and equally noisy proxy for the official print, and price the legs on Alpaca minute bars. The
+open → 09:31 leg becomes **+0.3bp, t 0.45**. The opening print does not overshoot; the ranking picks the names
+whose print happened to be low, and the "reversion" is that print correcting to the market. Selecting on the
+Alpaca open and pricing every leg on LSE gives the same answer: −2.7bp/day open to close.
+
+The Fama-MacBeth coefficient that survived the look-ahead fix (t −3.5) is the same artefact seen cross-sectionally:
+a regression of the open-to-close return on the gap measured from that open finds the open's own error.
+
+### What the books run
+
+Split by where SPY's 20-day realised volatility sits in its trailing year, the live rule from the 09:35 fill:
+
+| regime | bp/day | std | t | n |
+|---|---|---|---|---|
+| calm half | **−6.8** | 86 | −1.94 | 591 |
+| volatile half | +2.4 | 117 | +0.52 | 637 |
+
+2026-09-03 opens at the **5th percentile**. The gate in `intraday.vol_regime`, built when the edge still looked
+regime-dependent, would hold cash there, and on the honest numbers that is a wash either way: at 150% of NAV the
+fade is worth about −$100 a session with a $1,300 standard deviation, and standing aside trades the whole
+distribution for a certain zero. The gate stays available as an option and is left off; whether a book trades is a
+decision for the desk, not the runner. The levered index long is not an alternative — SPY open-to-close in the calm
+half is +0.3bp/day (t 0.10) with the variance of ten gap-fade baskets. Both books run the sleeve at 150% of NAV.
+
+What is left of the idea is the fill, not the signal: the +5bp lives between the auction print and the first
+trade after it, and only a market-on-open order sees that price, which requires ranking on pre-market quotes and an
+auction the paper engine does not simulate. That is the next experiment, not a last-session change.
