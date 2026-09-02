@@ -118,6 +118,10 @@ def main() -> None:
     ap.add_argument("--vol-gate", type=float, default=0.50,
                     help="skip the gap fade unless market volatility sits above this percentile of its own "
                          "trailing year; 0 disables the gate")
+    ap.add_argument("--index-long", default="",
+                    help="instead of the gap fade, hold a levered intraday long in this ETF (e.g. SPY)")
+    ap.add_argument("--index-leverage", type=float, default=4.0,
+                    help="multiple of NAV for --index-long; day-trading margin only, flat by the close")
     ap.add_argument("--crypto-budget", type=float, default=0.15,
                     help="fraction of NAV for the crypto dislocation sleeve (0 disables)")
     ap.add_argument("--topup", action="store_true",
@@ -170,12 +174,19 @@ def main() -> None:
         # Fading a gap is liquidity provision, and that is only paid for when liquidity is scarce. Below
         # the gate the signal has historically been worth nothing, so the book holds cash rather than
         # paying spread for a coin flip. See docs/research.md.
-        regime = intraday.vol_regime(client) if a.vol_gate else 1.0
-        if regime < a.vol_gate:
+        if a.index_long:
+            acct = cli.account()
+            picks = intraday.index_plan(p["nav"], client, a.index_long, a.index_leverage,
+                                        float(acct.get("buying_power") or 0) or None)
+            print(f"  levered index long: {a.index_long} at {a.index_leverage:.1f}x, flat by the close")
+            regime = 1.0
+        else:
+            regime = intraday.vol_regime(client) if a.vol_gate else 1.0
+        if not a.index_long and regime < a.vol_gate:
             print(f"  volatility at the {regime:.0%} percentile of its trailing year, below the "
                   f"{a.vol_gate:.0%} gate: standing aside")
             picks = []
-        else:
+        elif not a.index_long:
             print(f"  volatility at the {regime:.0%} percentile, gate {a.vol_gate:.0%}: trading")
             picks = intraday.plan(p["nav"], client, n=a.intraday_top, budget_pct=a.intraday_budget)
         for o in intraday.enter(picks, dry_run=not a.execute):

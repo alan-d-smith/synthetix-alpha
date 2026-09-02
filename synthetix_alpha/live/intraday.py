@@ -161,6 +161,29 @@ def plan(nav: float, client, n: int = 20, budget_pct: float = 0.40) -> list[dict
     return out
 
 
+def index_plan(nav: float, client, symbol: str = "SPY", leverage: float = 4.0,
+               buying_power: Optional[float] = None) -> list[dict]:
+    """A levered intraday long in one index ETF, flat by the close.
+
+    Not the gap fade: no selection and no signal, just market exposure sized to the account. It exists because
+    when the gap fade has no edge in the prevailing regime, a positive-drift bet beats a zero-drift one against
+    a target that has to be cleared. Intraday only - four times leverage is day-trading buying power and cannot
+    be carried overnight, so liquidate() has to close it before the bell.
+    """
+    bars = client.stock_bars([symbol], "1Day", dt.date.today() - dt.timedelta(days=5), dt.date.today())
+    if bars.empty:
+        return []
+    px = float(bars["close"].iloc[-1])
+    notional = nav * leverage
+    if buying_power:
+        notional = min(notional, buying_power * 0.97)     # room for the spread and a moving price
+    qty = int(notional // px) if px > 0 else 0
+    if qty < 1:
+        return []
+    return [{"symbol": symbol, "qty": qty, "price": round(px, 2), "gap": 0.0, "z": 0.0,
+             "notional": round(qty * px, 2)}]
+
+
 def _close_order(symbol: str, qty: float, *, dry_run: bool) -> dict:
     """Market-on-close sell, placed at entry as insurance only.
 
