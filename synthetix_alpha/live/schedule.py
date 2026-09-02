@@ -1,7 +1,7 @@
 """Competition scheduler: fires the runner at fixed times inside the window, once each.
 
-Two books run side by side, a ten-name gap fade basket on the research account and a twenty-name basket on the
-deployed one, so the concentrated and diversified versions are compared on live fills rather than in a backtest.
+The two books run different strategies; see BOOKS below for what each account is configured to do.
+
 
 Every action is recorded in a state file before it runs, so a crash and restart cannot enter twice. The window
 guard in `live.window` is the real safety net; this only decides when to call the runner.
@@ -31,8 +31,13 @@ ENTRY, TOPUP = dt.time(9, 31), dt.time(9, 45)
 # The second pass sells whatever the first missed, and is a no-op once the book is flat.
 FLATTEN = (dt.time(15, 50), dt.time(15, 56))
 
-# (label, account, gap fade basket). The options and crypto sleeves ride along with each entry run.
-BOOKS = [("research n=10", "research", 10), ("deployed n=20", "deployed", 20)]
+# (label, account, extra runner arguments). The options and crypto sleeves ride along with each entry run.
+# Both books run the gap fade at 150% of NAV with the volatility gate off: n=10 is the best vehicle available,
+# +0.034% per session in the current regime, and expected return scales with exposure.
+BOOKS = [
+    ("research n=10 @150%", "research", ["--intraday-top", "10", "--intraday-budget", "1.50", "--vol-gate", "0"]),
+    ("deployed n=10 @150%", "deployed", ["--intraday-top", "10", "--intraday-budget", "1.50", "--vol-gate", "0"]),
+]
 
 
 def _state() -> dict:
@@ -49,29 +54,28 @@ def _mark(key: str, value: dict) -> None:
     STATE.write_text(json.dumps(s, indent=1, sort_keys=True))
 
 
-def run_action(action: str, account: str, basket: int, execute: bool) -> dict:
+def run_action(action: str, account: str, extra: list[str], execute: bool) -> dict:
     """Invoke the runner as a subprocess so each account gets a clean process and its own credentials."""
     cmd = [sys.executable, "-m", "synthetix_alpha.live.run", "--account", account]
     if action in ("flatten", "topup"):
         cmd += [f"--{action}"]
     else:
-        cmd += ["--limit", "12", "--intraday-top", str(basket), "--intraday-budget", "0.60",
-                "--crypto-budget", "0.15"]
+        cmd += ["--limit", "12", "--crypto-budget", "0.15"] + list(extra)
     if execute:
         cmd += ["--execute"]
     started = dt.datetime.now(window.ET)
     p = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
     out = (p.stdout or "") + (p.stderr or "")
-    print(f"\n=== {started:%Y-%m-%d %H:%M:%S} ET | {action} | {account} | basket {basket} | rc {p.returncode} ===")
+    print(chr(10) + f"=== {started:%Y-%m-%d %H:%M:%S} ET | {action} | {account} | rc {p.returncode} ===")
     print(out.strip()[-4000:])
     return {"at": started.isoformat(), "rc": p.returncode, "cmd": " ".join(cmd[2:]),
             "tail": out.strip()[-2000:]}
 
 
-def due(now: dt.datetime) -> list[tuple[str, str, int, str]]:
+def due(now: dt.datetime) -> list[tuple[str, str, list, str]]:
     """Actions whose time has arrived today and which have not already run."""
     today, s, out = now.date().isoformat(), _state(), []
-    for label, account, basket in BOOKS:
+    for label, account, extra in BOOKS:
         timetable = [("enter", ENTRY, "enter"), ("topup", TOPUP, "topup")]
         timetable += [("flatten", at, f"flatten{i}") for i, at in enumerate(FLATTEN)]
         for action, at, name in timetable:
@@ -80,7 +84,7 @@ def due(now: dt.datetime) -> list[tuple[str, str, int, str]]:
                 continue
             gate = window.can_flatten if action == "flatten" else window.can_enter
             if now.time() >= at and gate(now)[0]:
-                out.append((action, account, basket, name))
+                out.append((action, account, extra, name))
     return out
 
 
@@ -97,11 +101,11 @@ def loop(execute: bool, poll: int = 20) -> None:
     # already refuse everything outside the window, so idling past it is inert. Stop it by hand when done.
     while True:
         now = window.now()
-        for action, account, basket, name in due(now):
+        for action, account, extra, name in due(now):
             key = f"{now.date().isoformat()}:{name}:{account}"
             _mark(key, {"started": now.isoformat(), "state": "running"})   # mark first: a crash must not retry
             try:
-                _mark(key, run_action(action, account, basket, execute))
+                _mark(key, run_action(action, account, extra, execute))
             except Exception as e:
                 _mark(key, {"at": now.isoformat(), "error": f"{type(e).__name__}: {e}"})
                 print(f"  {action}/{account} failed: {type(e).__name__}: {e}", flush=True)

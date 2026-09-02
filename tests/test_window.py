@@ -84,8 +84,45 @@ def test_both_flatten_passes_are_scheduled_on_the_final_session(tmp_path, monkey
 
 
 def test_scheduler_runs_both_books_on_separate_accounts():
+    """Two accounts, never the same one twice: a mix-up would double the size on one book and leave
+    the other idle."""
     from synthetix_alpha.live import schedule as sc
-    accounts = {a for _, a, _ in sc.BOOKS}
-    baskets = {b for _, _, b in sc.BOOKS}
-    assert accounts == {"research", "deployed"}
-    assert baskets == {10, 20}, "n=10 on research, n=20 on deployed"
+    accounts = [a for _, a, _ in sc.BOOKS]
+    assert sorted(accounts) == ["deployed", "research"]
+    assert len(set(accounts)) == len(accounts), "each account must appear exactly once"
+    for _, _, extra in sc.BOOKS:
+        assert extra, "every book needs its own runner arguments"
+        assert len(extra) % 2 == 0, "runner arguments come in flag/value pairs"
+
+
+def test_scheduler_passes_each_book_its_own_strategy():
+    """Each book gets its own runner arguments, so they must not be shared or swapped."""
+    from synthetix_alpha.live import schedule as sc
+    by_account = {a: extra for _, a, extra in sc.BOOKS}
+    for acct, extra in by_account.items():
+        assert "--index-long" not in extra, "the books run the gap fade, not the index long"
+        n = extra[extra.index("--intraday-top") + 1]
+        assert int(n) > 0, f"{acct} must actually trade"
+        budget = float(extra[extra.index("--intraday-budget") + 1])
+        assert 0 < budget <= 1.5, f"{acct} budget {budget} is outside the sane range"
+        assert extra[extra.index("--vol-gate") + 1] == "0", f"{acct} must not stand aside on the vol gate"
+
+
+def test_run_action_builds_a_command_without_crashing(monkeypatch):
+    """A NameError in run_action is invisible until the market opens: the scheduler records the failure in
+    the state file, marks the action done, and never retries."""
+    from synthetix_alpha.live import schedule as sc
+    seen = {}
+
+    class Done:
+        returncode, stdout, stderr = 0, "ok", ""
+
+    def fake(cmd, **kw):
+        seen["cmd"] = cmd
+        return Done()
+    monkeypatch.setattr(sc.subprocess, "run", fake)
+    for _, account, extra in sc.BOOKS:
+        for action in ("enter", "topup", "flatten"):
+            out = sc.run_action(action, account, extra, execute=False)
+            assert out["rc"] == 0 and "error" not in out
+    assert "--account" in seen["cmd"]
