@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import Body, FastAPI, HTTPException
@@ -10,6 +11,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from synthetix_alpha.api.overview import build_overview
 from synthetix_alpha.api.overview_service import start_prewarm
 from synthetix_alpha.api.pipeline_runs import run_dry_pipeline
+
+# Local Next.js + production Vercel frontend. Override with comma-separated CORS_ORIGINS.
+_DEFAULT_CORS_ORIGINS = (
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3001",
+    "https://synthetix-alpha.vercel.app",
+)
+
+
+def cors_origins() -> list[str]:
+    raw = os.environ.get("CORS_ORIGINS", "").strip()
+    if not raw:
+        return list(_DEFAULT_CORS_ORIGINS)
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
 
 
 @asynccontextmanager
@@ -22,7 +39,7 @@ app = FastAPI(title="Synthetix Alpha Dashboard Adapter", version="0.1.0", lifesp
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001", "http://127.0.0.1:3001"],
+    allow_origins=cors_origins(),
     allow_methods=["GET", "POST"],
     allow_headers=["Accept", "Content-Type"],
 )
