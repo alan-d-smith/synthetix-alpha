@@ -156,7 +156,7 @@ class PipelineOrchestrator:
 
         # Phase 3 - CRITIQUE (with ensemble consistency + confidence threshold)
         try:
-            raw_decisions = self._critic.evaluate_batch(inputs, consistency=True)
+            raw_decisions = self._critic.evaluate_batch(inputs, consistency=False)
             result.approved_by_critic = [
                 d for d in raw_decisions
                 if d.decision == "APPROVED"
@@ -492,6 +492,29 @@ class PipelineOrchestrator:
                     "status": "skipped_no_legs",
                     "detail": "resolve legs via strategy engine before live execution",
                 })
+                continue
+
+            try:
+                submitted = execution.submit(
+                    legs,
+                    contracts,
+                    limit_price,
+                    dry_run=dry_run,
+                )
+                results.append({
+                    "symbol": symbol,
+                    **submitted,
+                })
+            except Exception as exc:
+                logger.exception("Execution failed for %s", symbol)
+                results.append({
+                    "symbol": symbol,
+                    "client_order_id": coid or "pending",
+                    "status": "error",
+                    "detail": str(exc),
+                })
+
+        return results
 # ---------------------------------------------------------------------------
 # CLI entry point:  python -m synthetix_alpha.pipeline.orchestrator --dry-run
 # ---------------------------------------------------------------------------

@@ -290,6 +290,44 @@ def test_form_orders_without_chain() -> None:
     assert len(o["legs"]) == 2
 
 
+def test_execute_orders_delegates_to_execution(monkeypatch) -> None:
+    from synthetix_alpha.pipeline import orchestrator as orch_module
+
+    calls = []
+
+    def fake_submit(legs, contracts, limit_price, *, dry_run=True):
+        calls.append((legs, contracts, limit_price, dry_run))
+        return {
+            "client_order_id": "test-coid",
+            "status": "dry_run",
+            "net": "credit",
+        }
+
+    monkeypatch.setattr(orch_module.execution, "submit", fake_submit)
+
+    orch = PipelineOrchestrator(mock_llm=True)
+    legs = [
+        {"symbol": "SPY260930P00760000", "side": "short", "ratio": 1},
+        {"symbol": "SPY260930P00740000", "side": "long", "ratio": 1},
+    ]
+
+    result = orch._execute_orders(
+        [{
+            "symbol": "SPY",
+            "legs": legs,
+            "contracts": 2,
+            "limit_price": -1.50,
+            "client_order_id": "test-coid",
+        }],
+        dry_run=True,
+    )
+
+    assert result[0]["symbol"] == "SPY"
+    assert result[0]["status"] == "dry_run"
+    assert calls == [(legs, 2, -1.50, True)]
+
+
+
 def test_resolve_legs_abstract(monkeypatch) -> None:
     """Falls back to placeholder symbols when no chain data is available.
 
