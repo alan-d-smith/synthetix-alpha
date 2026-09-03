@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from curses import raw
 import json
 import logging
 import os
@@ -10,10 +11,12 @@ from typing import Optional, Type, TypeVar
 
 from pydantic import BaseModel
 
+from synthetix_alpha.data import schema
+
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
-_MAX_RETRIES: int = 3
+_MAX_RETRIES: int = 1
 _BACKOFF_BASE: float = 2.0
 
 
@@ -49,9 +52,9 @@ class LLMClient:
         mock: bool = False,
         seed: int = 42,
     ) -> None:
-        self._api_key = api_key or os.environ.get("OPENAI_API_KEY")
-        self._base_url = base_url or os.environ.get("OPENAI_BASE_URL")
-        self._model = model or os.environ.get("OPENAI_MODEL")
+        self._api_key = (api_key or os.environ.get("FEATHERLESS_API_KEY") or os.environ.get("OPENAI_API_KEY"))
+        self._base_url = (base_url or os.environ.get("FEATHERLESS_BASE_URL") or os.environ.get("OPENAI_BASE_URL"))
+        self._model = (model or os.environ.get("FEATHERLESS_MODEL") or os.environ.get("OPENAI_MODEL"))
         self._mock = mock or not self._api_key
         self._seed = seed
         self._client: object = None
@@ -104,6 +107,7 @@ class LLMClient:
                 temperature=0.0,
                 top_p=0.1,
                 seed=self._seed,
+                max_tokens=300,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
@@ -121,7 +125,13 @@ class LLMClient:
         for attempt in range(_MAX_RETRIES + 1):
             try:
                 raw = self.complete(aug, user_prompt, temperature=0.0)
+
+                if not raw.strip():
+                    raise LLMAPIError("LLM returned an empty response")
+
                 return schema.model_validate_json(self._strip_json(raw))
+
+                
             except (json.JSONDecodeError, ValueError) as exc:
                 if attempt == _MAX_RETRIES:
                     raise LLMAPIError(
