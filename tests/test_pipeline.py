@@ -55,13 +55,16 @@ def test_llm_strip_json_ws() -> None:
 
 
 def test_llm_default_mock_mode() -> None:
-    old = os.environ.pop("OPENAI_API_KEY", None)
+    old_openai = os.environ.pop("OPENAI_API_KEY", None)
+    old_featherless = os.environ.pop("FEATHERLESS_API_KEY", None)
     try:
         llm = LLMClient()
         assert llm._mock is True
     finally:
-        if old:
-            os.environ["OPENAI_API_KEY"] = old
+        if old_openai:
+            os.environ["OPENAI_API_KEY"] = old_openai
+        if old_featherless:
+            os.environ["FEATHERLESS_API_KEY"] = old_featherless
 
 
 def test_llm_key_disables_mock() -> None:

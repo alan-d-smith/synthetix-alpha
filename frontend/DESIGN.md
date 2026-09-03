@@ -1,10 +1,10 @@
 ---
 version: alpha
 colors:
-  canvas: "#090B10"
-  surface: "#0E1219"
-  raised: "#141A24"
-  hover: "#18202B"
+  canvas: "#050506"
+  surface: "#0C0E12"
+  raised: "#12151C"
+  hover: "#171B24"
   border: "#252D3A"
   foreground: "#F0F4F8"
   secondary: "#A8B2C1"

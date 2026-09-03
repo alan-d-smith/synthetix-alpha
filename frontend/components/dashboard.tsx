@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "motion/react";
-import { Check, ChevronDown, Copy, Database, Play, ShieldCheck, TriangleAlert, X } from "lucide-react";
-import { requestDryPipeline } from "@/lib/api";
+import { Check, ChevronDown, Copy, Database, LoaderCircle, Play, ShieldCheck, TriangleAlert, X } from "lucide-react";
+import { requestDryPipeline, type DryPipelineResponse } from "@/lib/api";
 import { useDashboard } from "@/lib/dashboard-context";
 import type {
   Candidate,
@@ -23,6 +23,7 @@ import { PerformanceCharts, ResearchBars } from "@/components/charts/synthetix-c
 
 type Page = "command" | "pipeline" | "opportunities" | "portfolio" | "research" | "system";
 type SortKey = "iv" | "hv" | "ivRv" | "ivRank" | "liquidity" | "confidence" | "updated";
+type DryRunState = "idle" | "running" | "success" | "error";
 
 const stageColors: Record<string, string> = {
   complete: "bg-cyan",
@@ -31,11 +32,27 @@ const stageColors: Record<string, string> = {
   pending: "bg-muted",
 };
 
+const stageStatusLabel: Record<string, string> = {
+  complete: "Complete",
+  active: "Active",
+  blocked: "Blocked",
+  pending: "Pending",
+};
+
 const statusTone: Record<RiskStatus, string> = {
   APPROVED: "text-positive",
   HALTED: "text-negative",
   PENDING: "text-warning",
   UNAVAILABLE: "text-negative",
+};
+
+const pageCopy: Record<Page, [string, string]> = {
+  command: ["Command Center", "Paper options command center — AI-assisted, operator-controlled"],
+  pipeline: ["Pipeline", "Decision audit for the latest paper run"],
+  opportunities: ["Opportunities", "Volatility setups ranked by the current decision system"],
+  portfolio: ["Portfolio", "Current paper account posture and execution record"],
+  research: ["Research", "Historical strategy evidence and verification"],
+  system: ["System", "Data freshness, adapter state, and runtime boundaries"],
 };
 
 export function DashboardPage({ page }: { page: Page }) {
@@ -90,19 +107,42 @@ function LoadingPage() {
 }
 
 function DashboardContent({ page, snapshot }: { page: Page; snapshot: DashboardSnapshot }) {
-  const titles: Record<Page, [string, string]> = {
-    command: ["Command Center", "Autonomous paper trading command center"],
-    pipeline: ["Pipeline", "Decision audit for the latest paper run"],
-    opportunities: ["Opportunities", "Volatility setups ranked by the current decision system"],
-    portfolio: ["Portfolio", "Current paper account posture and execution record"],
-    research: ["Research", "Historical strategy evidence and verification"],
-    system: ["System", "Data freshness, adapter state, and runtime boundaries"],
-  };
-  const [title, subtitle] = titles[page];
+  const [title, subtitle] = pageCopy[page];
+  if (page === "command") {
+    return (
+      <div className="mx-auto max-w-[1800px] space-y-10">
+        <StatusBrandBar title={title} subtitle={subtitle} snapshot={snapshot} />
+        <section id="command" aria-labelledby="section-command-title" className="scroll-mt-16 space-y-8">
+          <SectionHeading id="section-command-title" title="Overview" detail="Account posture, lead decision, and enforced risk envelope" />
+          <CommandOverview snapshot={snapshot} />
+        </section>
+        <section id="pipeline" aria-labelledby="section-pipeline-title" className="scroll-mt-16 space-y-8">
+          <SectionHeading id="section-pipeline-title" title="Pipeline" detail={pageCopy.pipeline[1]} />
+          <PipelineView snapshot={snapshot} />
+        </section>
+        <section id="opportunities" aria-labelledby="section-opportunities-title" className="scroll-mt-16 space-y-8">
+          <SectionHeading id="section-opportunities-title" title="Opportunities" detail={pageCopy.opportunities[1]} />
+          <OpportunitiesView snapshot={snapshot} />
+        </section>
+        <section id="portfolio" aria-labelledby="section-portfolio-title" className="scroll-mt-16 space-y-8">
+          <SectionHeading id="section-portfolio-title" title="Portfolio" detail={pageCopy.portfolio[1]} />
+          <PortfolioView snapshot={snapshot} />
+        </section>
+        <section id="research" aria-labelledby="section-research-title" className="scroll-mt-16 space-y-8">
+          <SectionHeading id="section-research-title" title="Research" detail={pageCopy.research[1]} />
+          <ResearchView snapshot={snapshot} />
+        </section>
+        <section id="system" aria-labelledby="section-system-title" className="scroll-mt-16 space-y-8">
+          <SectionHeading id="section-system-title" title="System" detail={pageCopy.system[1]} />
+          <SystemView snapshot={snapshot} />
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-[1800px] space-y-8">
-      <PageHeader title={title} subtitle={subtitle} snapshot={snapshot} />
-      {page === "command" ? <CommandCenter snapshot={snapshot} /> : null}
+      <StatusBrandBar title={title} subtitle={subtitle} snapshot={snapshot} />
       {page === "pipeline" ? <PipelineView snapshot={snapshot} /> : null}
       {page === "opportunities" ? <OpportunitiesView snapshot={snapshot} /> : null}
       {page === "portfolio" ? <PortfolioView snapshot={snapshot} /> : null}
@@ -112,37 +152,177 @@ function DashboardContent({ page, snapshot }: { page: Page; snapshot: DashboardS
   );
 }
 
-function PageHeader({ title, subtitle, snapshot }: { title: string; subtitle: string; snapshot: DashboardSnapshot }) {
-  const [message, setMessage] = useState<string | null>(null);
+function SectionHeading({ id, title, detail }: { id: string; title: string; detail: string }) {
+  return (
+    <div className="border-b border-subtle pb-3">
+      <h2 id={id} className="font-display text-lg font-semibold tracking-[-0.03em]">
+        {title}
+      </h2>
+      <p className="mt-1 text-xs text-secondary">{detail}</p>
+    </div>
+  );
+}
+
+function adapterConnection(snapshot: DashboardSnapshot) {
+  if (snapshot.mode === "mock") return { label: "Demo fallback", tone: "text-violet" as const, detail: "Adapter not reached — showing typed demo snapshot." };
+  const status = snapshot.system.api.status;
+  if (status === "fresh") return { label: "Connected", tone: "text-positive" as const, detail: snapshot.system.api.detail ?? "Dashboard adapter responding." };
+  if (status === "refreshing") return { label: "Refreshing", tone: "text-cyan" as const, detail: "Snapshot refresh in progress." };
+  if (status === "delayed") return { label: "Stale", tone: "text-warning" as const, detail: "Adapter response is delayed." };
+  return { label: "Unavailable", tone: "text-negative" as const, detail: "Adapter health reports unavailable." };
+}
+
+function StatusBrandBar({ title, subtitle, snapshot }: { title: string; subtitle: string; snapshot: DashboardSnapshot }) {
+  const { refresh } = useDashboard();
+  const [dryState, setDryState] = useState<DryRunState>("idle");
+  const [result, setResult] = useState<DryPipelineResponse | null>(null);
+  const connection = adapterConnection(snapshot);
+  const demo = snapshot.mode === "mock";
+
   async function run() {
-    const result = await requestDryPipeline();
-    setMessage(result.detail);
+    if (dryState === "running" || demo) return;
+    setDryState("running");
+    setResult(null);
+    const response = await requestDryPipeline();
+    setResult(response);
+    setDryState(response.available && response.status !== "error" ? "success" : "error");
+    if (response.available) refresh();
   }
+
+  const buttonLabel =
+    dryState === "running" ? "Running dry pipeline…" : dryState === "success" ? "Dry run complete" : dryState === "error" ? "Dry run failed — retry" : "Run dry pipeline";
+
   return (
     <>
-      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
-        <div>
-          <p className="eyebrow">Synthetix Alpha</p>
-          <h1 className="page-title mt-1">{title}</h1>
-          <p className="mt-1 text-sm text-secondary">{subtitle}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded-full border border-warning/40 bg-warning/10 px-2 py-1 font-mono text-[10px] font-medium tracking-[0.1em] text-warning">
-            PAPER TRADING
-          </span>
-          {snapshot.mode === "mock" ? (
-            <span className="rounded-full border border-violet/40 bg-violet/10 px-2 py-1 font-mono text-[10px] font-medium tracking-[0.1em] text-violet">
-              DEMO DATA
+      <div className="panel overflow-hidden p-4 sm:p-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="min-w-0">
+            <p className="eyebrow">Synthetix Alpha</p>
+            <h1 className="page-title mt-1 break-words">{title}</h1>
+            <p className="mt-1 max-w-2xl text-sm text-secondary">{subtitle}</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full border border-warning/40 bg-warning/10 px-2 py-1 font-mono text-[10px] font-medium tracking-[0.1em] text-warning">
+              PAPER TRADING
             </span>
-          ) : null}
-          <Button variant="primary" onClick={run} disabled={snapshot.mode === "mock"}>
-            <Play className="h-3.5 w-3.5" />
-            Run dry pipeline
-          </Button>
+            <span className="rounded-full border border-cyan/35 bg-cyan/10 px-2 py-1 font-mono text-[10px] font-medium tracking-[0.1em] text-cyan">
+              COPILOT
+            </span>
+            <span className="rounded-full border border-subtle px-2 py-1 font-mono text-[10px] font-medium tracking-[0.1em] text-secondary">
+              MANUAL TRIGGER
+            </span>
+            {demo ? (
+              <span className="rounded-full border border-violet/40 bg-violet/10 px-2 py-1 font-mono text-[10px] font-medium tracking-[0.1em] text-violet">
+                DEMO DATA
+              </span>
+            ) : null}
+            <Button
+              variant="primary"
+              onClick={run}
+              disabled={demo || dryState === "running"}
+              aria-busy={dryState === "running"}
+              aria-live="polite"
+              className={cn(
+                dryState === "success" && "border-positive/40 bg-positive/10 text-positive",
+                dryState === "error" && "border-negative/40 bg-negative/10 text-negative",
+              )}
+            >
+              {dryState === "running" ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+              {buttonLabel}
+            </Button>
+          </div>
+        </div>
+        <div className="mt-4 grid gap-3 border-t border-subtle pt-4 sm:grid-cols-2 xl:grid-cols-4">
+          <StatusChip label="Connection" value={connection.label} tone={connection.tone} detail={connection.detail} />
+          <StatusChip label="Operating mode" value="Copilot" tone="text-cyan" detail="AI proposes; operator runs dry pipeline. No autonomous trading loop." />
+          <StatusChip
+            label="Pipeline"
+            value={snapshot.pipeline.finalState === "partial" ? "Execution limited" : snapshot.pipeline.finalState}
+            tone={snapshot.pipeline.finalState === "halted" ? "text-negative" : "text-secondary"}
+            detail={`Run ${snapshot.pipeline.id}`}
+          />
+          <StatusChip
+            label="As of"
+            value={new Date(snapshot.asOf).toLocaleTimeString("en-US", {
+              hour: "2-digit",
+              minute: "2-digit",
+              timeZone: "America/New_York",
+              timeZoneName: "short",
+            })}
+            tone="text-secondary"
+            detail={snapshot.system.api.source}
+          />
         </div>
       </div>
-      {message ? <PanelAlert title="Pipeline action" detail={message} tone="info" /> : null}
+      {result ? (
+        <DryPipelineResultPanel result={result} state={dryState} />
+      ) : null}
     </>
+  );
+}
+
+function StatusChip({
+  label,
+  value,
+  detail,
+  tone,
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  tone: string;
+}) {
+  return (
+    <div className="min-w-0 rounded-control border border-subtle bg-canvas/60 px-3 py-2.5">
+      <p className="eyebrow">{label}</p>
+      <p className={cn("mt-1 font-mono text-xs font-medium", tone)}>{value}</p>
+      <p className="mt-1 text-[11px] leading-4 text-muted">{detail}</p>
+    </div>
+  );
+}
+
+function DryPipelineResultPanel({ result, state }: { result: DryPipelineResponse; state: DryRunState }) {
+  const tone = state === "success" ? "info" : "negative";
+  return (
+    <div className="space-y-3" aria-live="polite">
+      <PanelAlert
+        title={state === "success" ? "Dry pipeline succeeded" : "Dry pipeline did not complete"}
+        detail={result.detail}
+        tone={tone}
+      />
+      {result.summary ? (
+        <div className="panel grid gap-2 p-4 sm:grid-cols-2 xl:grid-cols-4">
+          {(
+            [
+              ["Screened", result.summary.screened],
+              ["Critic approved", result.summary.criticApproved],
+              ["Risk approved", result.summary.riskApproved],
+              ["Risk halts", result.summary.riskHalts],
+            ] as const
+          ).map(([label, value]) => (
+            <div key={label} className="rounded-control border border-subtle px-3 py-2">
+              <p className="eyebrow">{label}</p>
+              <p className="mono mt-1 text-sm">{value}</p>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {result.errors?.length ? (
+        <div className="space-y-2">
+          {result.errors.map((error) => (
+            <PanelAlert key={error} title="Pipeline error" detail={error} tone="negative" />
+          ))}
+        </div>
+      ) : null}
+      {result.raw ? (
+        <details className="panel p-4 text-xs">
+          <summary className="cursor-pointer font-mono text-[11px] text-secondary">View adapter response</summary>
+          <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] text-muted">
+            {JSON.stringify(result.raw, null, 2)}
+          </pre>
+        </details>
+      ) : null}
+    </div>
   );
 }
 
@@ -150,10 +330,10 @@ export function SignalTrace({ snapshot, full = false }: { snapshot: DashboardSna
   const reduced = usePrefersReducedMotion();
   return (
     <section aria-label="Pipeline progress" className={cn("panel overflow-hidden", full ? "p-5" : "px-5 py-4")}>
-      <div className="mb-4 flex items-center justify-between gap-3">
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="eyebrow">Signal Trace</p>
-          <p className="mt-1 text-xs text-secondary">Screen → Gather → Critique → Form → Risk → Execute</p>
+          <p className="mt-1 text-xs text-secondary">SCREEN → GATHER → CRITIQUE → FORM → RISK → EXECUTE</p>
         </div>
         <span className="font-mono text-[11px] text-muted">RUN {snapshot.pipeline.id}</span>
       </div>
@@ -168,6 +348,7 @@ export function SignalTrace({ snapshot, full = false }: { snapshot: DashboardSna
           const quiet = stage.status === "complete";
           const active = stage.status === "active";
           const blocked = stage.status === "blocked";
+          const pending = stage.status === "pending";
           return (
             <motion.li
               key={stage.stage}
@@ -177,11 +358,13 @@ export function SignalTrace({ snapshot, full = false }: { snapshot: DashboardSna
               <div className="mb-2 flex items-center">
                 <motion.span
                   className={cn(
-                    "h-2 w-2 rounded-full",
+                    "h-2.5 w-2.5 rounded-full",
                     stageColors[stage.status],
                     active && "shadow-[0_0_10px_var(--data-cyan)]",
                     quiet && "opacity-70",
+                    pending && "opacity-45",
                   )}
+                  aria-hidden="true"
                   transition={motionTransition}
                 />
                 {index < snapshot.pipeline.stages.length - 1 ? (
@@ -196,9 +379,22 @@ export function SignalTrace({ snapshot, full = false }: { snapshot: DashboardSna
                   </span>
                 ) : null}
               </div>
-              <p className={cn("font-mono text-[10px] font-medium tracking-[0.12em]", quiet ? "text-muted" : "text-secondary")}>
-                {stage.label.toUpperCase()}
-              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className={cn("font-mono text-[10px] font-medium tracking-[0.12em]", quiet ? "text-muted" : "text-secondary")}>
+                  {stage.stage}
+                </p>
+                <span
+                  className={cn(
+                    "rounded-full px-1.5 py-0.5 font-mono text-[9px] tracking-[0.08em]",
+                    blocked && "bg-negative/10 text-negative",
+                    active && "bg-cyan/10 text-cyan",
+                    quiet && "bg-surface-hover text-muted",
+                    pending && "text-muted",
+                  )}
+                >
+                  {stageStatusLabel[stage.status] ?? stage.status}
+                </span>
+              </div>
               <p className={cn("mt-1 text-xs leading-4", blocked ? "text-negative" : quiet ? "text-secondary" : "text-foreground")}>
                 {stage.result}
               </p>
@@ -206,6 +402,9 @@ export function SignalTrace({ snapshot, full = false }: { snapshot: DashboardSna
           );
         })}
       </motion.ol>
+      {snapshot.pipeline.stages.length === 0 ? (
+        <EmptyState title="No pipeline candidates in the latest run." detail="The adapter returned an empty stage list for this snapshot." />
+      ) : null}
     </section>
   );
 }
@@ -236,7 +435,7 @@ function AccountRiskSummary({ snapshot }: { snapshot: DashboardSnapshot }) {
           </span>
         )}
       </div>
-      <div className="flex overflow-x-auto pb-1">
+      <div className="flex overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
         <Metric label="NAV" value={currency(p.nav)} />
         <Metric label="Cash" value={currency(p.cash)} />
         <Metric label="Open positions" value={`${p.positions.length} / ${p.maxPositions}`} />
@@ -317,54 +516,137 @@ function Confidence({ value }: { value: number }) {
   );
 }
 
-function RiskEnvelope({ snapshot }: { snapshot: DashboardSnapshot }) {
-  const p = snapshot.portfolio;
-  const reduced = usePrefersReducedMotion();
-  const rows = [
-    { label: "Premium at risk", current: p.premiumAtRisk, max: p.premiumAtRiskCap, display: `${currency(p.premiumAtRisk)} / ${currency(p.premiumAtRiskCap)}` },
-    { label: "Position slots", current: p.positions.length, max: p.maxPositions, display: `${p.positions.length} / ${p.maxPositions}` },
-    { label: "Daily drawdown", current: p.dailyDrawdown ?? 0, max: 0.05, display: p.dailyDrawdown === null ? "Unavailable" : `${percent(p.dailyDrawdown)} / 5.0%` },
-    { label: "Total drawdown", current: p.totalDrawdown ?? 0, max: 0.2, display: p.totalDrawdown === null ? "Unavailable" : `${percent(p.totalDrawdown)} / 20.0%` },
-  ];
+function RiskGuardsPanel({ snapshot, compact = false }: { snapshot: DashboardSnapshot; compact?: boolean }) {
+  const governance = snapshot.system.governance;
+  const enforced = governance.filter((row) => row.state === "enforced");
+  const configured = governance.filter((row) => row.state === "configured_not_enforced");
+
   return (
     <section className="panel p-5">
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex items-start justify-between gap-3">
         <div>
-          <h2 className="section-title">Risk envelope</h2>
-          <p className="mt-1 text-xs text-muted">Enforced runtime controls</p>
+          <h2 className="section-title">Risk Guards & Parameters</h2>
+          <p className="mt-1 text-xs text-muted">Read-only governance — parameters cannot be edited from the dashboard</p>
         </div>
-        <ShieldCheck className="h-4 w-4 text-cyan" />
+        <ShieldCheck className="h-4 w-4 shrink-0 text-cyan" aria-hidden="true" />
       </div>
-      <div className="space-y-4">
-        {rows.map((row) => {
-          const ratio = Math.min(row.current / row.max, 1);
-          const color = ratio >= 1 ? "bg-negative" : ratio >= 0.8 ? "bg-warning" : "bg-cyan";
-          const width = `${Math.max(ratio * 100, 2)}%`;
-          return (
-            <div key={row.label}>
-              <div className="mb-1.5 flex justify-between gap-3 text-xs">
-                <span className="text-secondary">{row.label}</span>
-                <span className="mono text-foreground">{row.display}</span>
-              </div>
-              <div className="h-1 overflow-hidden rounded-full bg-border-subtle">
-                <motion.div
-                  className={cn("h-1 rounded-full", color)}
-                  initial={reduced ? false : { width: 0 }}
-                  transition={{ ...motionTransition, duration: 0.55 }}
-                  viewport={{ once: true, amount: 0.8 }}
-                  whileInView={reduced ? undefined : { width }}
-                />
-              </div>
+      {governance.length ? (
+        <div className="space-y-4">
+          <ul className="space-y-2">
+            {enforced.map((row) => (
+              <li key={row.name} className="flex flex-col gap-1 border-b border-subtle/70 pb-2 text-xs last:border-b-0 sm:flex-row sm:items-center sm:justify-between">
+                <span className="text-foreground">{row.name}</span>
+                <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                  <span className="mono text-secondary">{row.value}</span>
+                  <span className="font-mono text-[9px] tracking-[0.08em] text-positive">ENFORCED</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+          {configured.length ? (
+            <div className="border-t border-subtle pt-4">
+              <p className="eyebrow">Configured · not enforced</p>
+              <ul className="mt-2 space-y-2">
+                {configured.map((row) => (
+                  <li key={row.name} className="flex flex-col gap-1 border-b border-subtle/70 pb-2 text-xs last:border-b-0 sm:flex-row sm:items-center sm:justify-between">
+                    <span className="text-foreground">{row.name}</span>
+                    <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                      <span className="mono text-secondary">{row.value}</span>
+                      <span className="font-mono text-[9px] tracking-[0.08em] text-warning">CONFIGURED · NOT ENFORCED</span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
             </div>
-          );
-        })}
+          ) : null}
+        </div>
+      ) : (
+        <p className="text-xs text-warning">Governance rows were not returned by the adapter.</p>
+      )}
+      {!compact ? (
+        <p className="mt-4 text-[11px] leading-4 text-muted">
+          Full governance detail and runtime limitations live under System.
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+function PipelineRunSummary({ snapshot }: { snapshot: DashboardSnapshot }) {
+  const execute = snapshot.pipeline.stages.find((s) => s.stage === "EXECUTE");
+  const risk = snapshot.pipeline.stages.find((s) => s.stage === "RISK");
+  const form = snapshot.pipeline.stages.find((s) => s.stage === "FORM");
+  return (
+    <section className="panel p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="eyebrow">Latest run</p>
+          <h2 className="section-title mt-1">Run {snapshot.pipeline.id}</h2>
+          <p className="mt-1 text-xs text-secondary">
+            {new Date(snapshot.pipeline.asOf).toLocaleString("en-US", { timeZone: "America/New_York", timeZoneName: "short" })}
+          </p>
+        </div>
+        <span className="rounded-full border border-cyan/35 bg-cyan/10 px-2 py-1 font-mono text-[10px] text-cyan">
+          DRY-RUN ONLY
+        </span>
       </div>
-      <div className="mt-5 border-t border-subtle pt-4">
-        <p className="eyebrow">Configured — not enforced by current runtime</p>
-        <p className="mt-1 text-xs leading-5 text-warning">
-          Sector concentration and weekly drawdown limits remain configuration-only in the current backend.
+      <div className="mt-4 grid gap-2 sm:grid-cols-3">
+        {snapshot.pipeline.stages.slice(0, 3).map((stage) => (
+          <div key={stage.stage} className="rounded-control border border-subtle px-3 py-2">
+            <p className="font-mono text-[10px] text-muted">{stage.stage}</p>
+            <p className="mt-1 text-xs text-secondary">{stage.result}</p>
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 rounded-control border border-subtle bg-canvas/50 px-3 py-3 text-xs text-secondary">
+        <p>
+          <span className="font-mono text-foreground">FORM</span> · {form?.result ?? "—"}
+        </p>
+        <p className="mt-1">
+          <span className="font-mono text-foreground">RISK</span> · {risk?.result ?? "—"}
+        </p>
+        <p className="mt-1">
+          <span className="font-mono text-foreground">EXECUTE</span> · {execute?.result ?? "Dry-run only — live submission disabled in the dashboard adapter."}
         </p>
       </div>
+    </section>
+  );
+}
+
+function ResearchSummaryCompact({ snapshot }: { snapshot: DashboardSnapshot }) {
+  const p = snapshot.performance;
+  const unavailable = !p.name || p.name === "unavailable" || p.equity.length === 0;
+  if (unavailable) {
+    return (
+      <section className="panel p-5">
+        <p className="eyebrow">Historical research</p>
+        <EmptyState title="Research artifacts unavailable" detail="Historical strategy evidence was not returned by the adapter." />
+      </section>
+    );
+  }
+  return (
+    <section className="panel p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="eyebrow">Historical research</p>
+          <h2 className="section-title mt-1">{p.name}</h2>
+          <p className="mt-2 text-xs text-secondary">
+            Sharpe <span className="mono text-foreground">{p.sharpe.toFixed(2)}</span>
+            {" · "}
+            Max DD <span className="mono text-negative">{percent(p.maxDrawdown)}</span>
+            {" · "}
+            Win rate <span className="mono text-foreground">{percent(p.winRate, 0)}</span>
+            {" · "}
+            <span className="mono text-foreground">{p.trades}</span> trades
+          </p>
+        </div>
+        <span className="rounded-full border border-violet/40 bg-violet/10 px-2 py-1 font-mono text-[10px] text-violet">
+          NOT LIVE PERFORMANCE
+        </span>
+      </div>
+      <p className="mt-3 text-xs text-muted">
+        Full charts and verification tables are in the Research section below.
+      </p>
     </section>
   );
 }
@@ -702,32 +984,49 @@ function OpportunityInspector({ candidate, onClose }: { candidate: Candidate | n
   );
 }
 
-function CommandCenter({ snapshot }: { snapshot: DashboardSnapshot }) {
-  const lead = snapshot.candidates.find((c) => c.critic.decision === "APPROVED") ?? snapshot.candidates[0];
+function CommandOverview({ snapshot }: { snapshot: DashboardSnapshot }) {
+  const lead =
+    snapshot.candidates.find((c) => c.critic.decision === "APPROVED" && c.risk === "APPROVED") ??
+    snapshot.candidates.find((c) => c.critic.decision === "APPROVED") ??
+    snapshot.candidates[0];
   return (
     <>
       <Reveal>
         <AccountRiskSummary snapshot={snapshot} />
       </Reveal>
       <div className="grid gap-5 xl:grid-cols-12">
-        <Reveal className="xl:col-span-8">
-          <PerformanceCharts snapshot={snapshot} />
-        </Reveal>
-        <Reveal className="space-y-5 xl:col-span-4">
+        <Reveal className="min-w-0 space-y-5 xl:col-span-8">
           <section className="panel p-5">
             {lead ? (
               <>
-                <div className="mb-5 flex items-center justify-between">
+                <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <p className="eyebrow">Current decision</p>
                     <h2 className="section-title mt-1">
                       {lead.ticker} · {lead.critic.decision}
                     </h2>
+                    <p className="mt-1 text-xs text-muted">Critic summary — not a hidden chain-of-thought dump</p>
                   </div>
                   <DecisionLabel value={lead.critic.decision} />
                 </div>
                 <CriticMemo candidate={lead} />
                 <div className="mt-5 border-t border-subtle pt-4">
+                  <p className="eyebrow">Proposed structure</p>
+                  {lead.order ? (
+                    <div className="mt-2 space-y-1 text-xs text-secondary">
+                      <p>
+                        {lead.order.contracts} contract · max loss{" "}
+                        <span className="mono text-foreground">{currency(lead.order.maxLoss)}</span>
+                      </p>
+                      <p>
+                        Resolution · <span className="mono text-foreground">{lead.order.resolution}</span>
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-xs text-muted">No formed order is available for this candidate in the latest run.</p>
+                  )}
+                </div>
+                <div className="mt-4 border-t border-subtle pt-4">
                   <p className="eyebrow">Risk result</p>
                   <div className="mt-2">
                     <RiskLabel value={lead.risk} />
@@ -738,28 +1037,49 @@ function CommandCenter({ snapshot }: { snapshot: DashboardSnapshot }) {
               <EmptyState title="Critic found no setup that clears the configured confidence threshold." detail="The latest scan produced no candidates. That is a calm, valid pipeline outcome." />
             )}
           </section>
-          <RiskEnvelope snapshot={snapshot} />
+          <PipelineRunSummary snapshot={snapshot} />
+        </Reveal>
+        <Reveal className="min-w-0 space-y-5 xl:col-span-4">
+          <RiskGuardsPanel snapshot={snapshot} compact />
+          <ResearchSummaryCompact snapshot={snapshot} />
         </Reveal>
       </div>
       <Reveal>
-        <SignalTrace snapshot={snapshot} />
+        <CompactPositions snapshot={snapshot} />
       </Reveal>
-      <Reveal>
-        <OpportunityTable snapshot={snapshot} />
-      </Reveal>
-      <div className="grid gap-5 xl:grid-cols-12">
-        <Reveal className="xl:col-span-7">
-          <PositionTable snapshot={snapshot} compact />
-        </Reveal>
-        <Reveal className="xl:col-span-5">
-          <RiskEvents snapshot={snapshot} />
-        </Reveal>
-      </div>
     </>
   );
 }
 
+function CompactPositions({ snapshot }: { snapshot: DashboardSnapshot }) {
+  const p = snapshot.portfolio;
+  if (p.positions.length === 0) {
+    return (
+      <section className="panel p-5">
+        <p className="eyebrow">Positions</p>
+        <EmptyState
+          title="No open positions"
+          detail={`Your paper account currently holds no option contracts. ${p.positions.length} / ${p.maxPositions} position slots used.`}
+        />
+      </section>
+    );
+  }
+  return <PositionTable snapshot={snapshot} compact />;
+}
+
 function PositionTable({ snapshot, compact = false }: { snapshot: DashboardSnapshot; compact?: boolean }) {
+  const empty = snapshot.portfolio.positions.length === 0;
+  if (empty) {
+    return (
+      <section className="panel p-5">
+        <p className="eyebrow">Positions</p>
+        <EmptyState
+          title="No open positions"
+          detail={`Your paper account currently holds no option contracts. ${snapshot.portfolio.positions.length} / ${snapshot.portfolio.maxPositions} position slots used.`}
+        />
+      </section>
+    );
+  }
   return (
     <section className="panel overflow-hidden">
       <div className="flex items-center justify-between border-b border-subtle px-5 py-4">
@@ -813,13 +1133,6 @@ function PositionTable({ snapshot, compact = false }: { snapshot: DashboardSnaps
                 </td>
               </tr>
             ))}
-            {snapshot.portfolio.positions.length === 0 ? (
-              <tr>
-                <td colSpan={compact ? 5 : 6}>
-                  <EmptyState title="No open paper positions." detail="Paper account currently holds no option contracts." />
-                </td>
-              </tr>
-            ) : null}
           </tbody>
         </table>
       </div>
@@ -829,27 +1142,23 @@ function PositionTable({ snapshot, compact = false }: { snapshot: DashboardSnaps
 
 function RiskEvents({ snapshot }: { snapshot: DashboardSnapshot }) {
   const blocked = snapshot.pipeline.events.filter((event) => event.status === "blocked");
-  const warnings = snapshot.warnings;
+  const unprotected = snapshot.portfolio.positions.filter((p) => !p.protected);
+  const hasEvents = blocked.length > 0 || unprotected.length > 0;
   return (
     <section className="panel p-5">
       <div>
         <h2 className="section-title">Risk events</h2>
-        <p className="mt-1 text-xs text-muted">Latest pipeline exceptions and account warnings</p>
+        <p className="mt-1 text-xs text-muted">Halts, breaches, and execution errors in the latest run</p>
       </div>
       <div className="mt-5 space-y-3">
         {blocked.map((event) => (
           <PanelAlert key={event.id} title={`${event.stage} · ${event.ticker ?? "System"}`} detail={event.detail} tone="negative" />
         ))}
-        {snapshot.portfolio.positions
-          .filter((p) => !p.protected)
-          .map((p) => (
-            <PanelAlert key={p.symbol} title="Protection review" detail={`${p.symbol} has no verified resting closing order.`} tone="warning" />
-          ))}
-        {warnings.map((warning) => (
-          <PanelAlert key={warning} title="Data notice" detail={warning} tone="info" />
+        {unprotected.map((p) => (
+          <PanelAlert key={p.symbol} title="Protection review" detail={`${p.symbol} has no verified resting closing order.`} tone="warning" />
         ))}
-        {blocked.length === 0 && snapshot.portfolio.positions.every((p) => p.protected) && warnings.length === 0 ? (
-          <EmptyState title="No active risk events" detail="No blocked pipeline transitions or unprotected legs in the current snapshot." />
+        {!hasEvents ? (
+          <EmptyState title="No risk events" detail="No halts, breaches, or execution errors in the latest run." />
         ) : null}
       </div>
     </section>
@@ -863,7 +1172,6 @@ function PipelineView({ snapshot }: { snapshot: DashboardSnapshot }) {
   const approvals = snapshot.candidates.filter((c) => c.critic.decision === "APPROVED").length;
   const rejections = snapshot.candidates.filter((c) => c.critic.decision === "REJECTED").length;
   const halts = snapshot.candidates.filter((c) => c.risk === "HALTED").length;
-  const unavailableExec = snapshot.executions.filter((e) => e.status === "unavailable" || e.status === "skipped_no_legs").length;
 
   return (
     <>
@@ -873,7 +1181,7 @@ function PipelineView({ snapshot }: { snapshot: DashboardSnapshot }) {
           <div>
             <p className="eyebrow">Latest run</p>
             <h2 className="mt-1 font-display text-xl font-semibold">
-              {snapshot.pipeline.finalState === "partial" ? "Completed with execution limitation" : snapshot.pipeline.finalState}
+              {snapshot.pipeline.stages.find((s) => s.stage === "EXECUTE")?.result ?? "Dry-run pipeline audit"}
             </h2>
             <p className="mt-1 text-xs text-secondary">
               {new Date(snapshot.pipeline.asOf).toLocaleString("en-US", { timeZone: "America/New_York", timeZoneName: "short" })} · Paper mode
@@ -887,7 +1195,7 @@ function PipelineView({ snapshot }: { snapshot: DashboardSnapshot }) {
           <AuditStat label="Critic approvals" value={String(approvals)} />
           <AuditStat label="Critic rejections" value={String(rejections)} />
           <AuditStat label="Risk halts" value={String(halts)} />
-          <AuditStat label="Unavailable execution" value={String(unavailableExec)} tone="negative" />
+          <AuditStat label="Execution" value="DRY-RUN ONLY" />
         </div>
       </section>
       </Reveal>
@@ -1031,14 +1339,9 @@ function AuditStat({ label, value, tone }: { label: string; value: string; tone?
 
 function OpportunitiesView({ snapshot }: { snapshot: DashboardSnapshot }) {
   return (
-    <>
-      <Reveal>
-        <SignalTrace snapshot={snapshot} />
-      </Reveal>
-      <Reveal>
-        <OpportunityTable snapshot={snapshot} />
-      </Reveal>
-    </>
+    <Reveal>
+      <OpportunityTable snapshot={snapshot} />
+    </Reveal>
   );
 }
 
@@ -1049,11 +1352,8 @@ function PortfolioView({ snapshot }: { snapshot: DashboardSnapshot }) {
         <AccountRiskSummary snapshot={snapshot} />
       </Reveal>
       <div className="grid gap-5 xl:grid-cols-12">
-        <Reveal className="xl:col-span-7">
+        <Reveal className="xl:col-span-12">
           <PositionTable snapshot={snapshot} />
-        </Reveal>
-        <Reveal className="xl:col-span-5">
-          <RiskEnvelope snapshot={snapshot} />
         </Reveal>
       </div>
       <Reveal>
@@ -1066,7 +1366,7 @@ function PortfolioView({ snapshot }: { snapshot: DashboardSnapshot }) {
 function ExecutionLedger({ snapshot }: { snapshot: DashboardSnapshot }) {
   return (
     <section className="panel overflow-hidden">
-      <div className="flex items-center justify-between border-b border-subtle px-5 py-4">
+      <div className="flex flex-col gap-2 border-b border-subtle px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="section-title">Execution ledger</h2>
           <p className="mt-1 text-xs text-muted">dry-run · skipped · duplicate · submitted · error — never implied fills</p>
@@ -1093,16 +1393,26 @@ function ExecutionLedger({ snapshot }: { snapshot: DashboardSnapshot }) {
                 <td className="px-3 py-3">
                   <button
                     onClick={() => navigator.clipboard?.writeText(execution.clientOrderId)}
-                    className="mono inline-flex items-center gap-1 text-[11px] text-secondary hover:text-cyan"
+                    className="mono inline-flex max-w-full items-center gap-1 truncate text-[11px] text-secondary hover:text-cyan"
                     aria-label={`Copy ${execution.clientOrderId}`}
                   >
-                    {execution.clientOrderId}
-                    <Copy className="h-3 w-3" />
+                    <span className="truncate">{execution.clientOrderId}</span>
+                    <Copy className="h-3 w-3 shrink-0" />
                   </button>
                 </td>
                 <td className="px-5 py-3 text-xs text-secondary">{execution.detail}</td>
               </tr>
             ))}
+            {snapshot.executions.length === 0 ? (
+              <tr>
+                <td colSpan={4}>
+                  <EmptyState
+                    title="No executions in this snapshot."
+                    detail="Adapter v1 does not yet stream a live execution ledger. Dry-run results appear here when the pipeline returns them."
+                  />
+                </td>
+              </tr>
+            ) : null}
           </tbody>
         </table>
       </div>
@@ -1125,6 +1435,15 @@ function ExecutionLabel({ value }: { value: ExecutionStatus }) {
 
 function ResearchView({ snapshot }: { snapshot: DashboardSnapshot }) {
   const p = snapshot.performance;
+  const unavailable = !p.name || p.name === "unavailable" || p.equity.length === 0;
+  if (unavailable) {
+    return (
+      <EmptyState
+        title="Research artifacts unavailable"
+        detail="Historical strategy evidence was not returned by the adapter. Check research datasets and regenerate the performance snapshot."
+      />
+    );
+  }
   return (
     <>
       <Reveal>
@@ -1144,7 +1463,7 @@ function ResearchView({ snapshot }: { snapshot: DashboardSnapshot }) {
             </span>
           </div>
         </div>
-        <div className="mt-5 flex overflow-x-auto border-t border-subtle pt-4">
+        <div className="mt-5 flex overflow-x-auto border-t border-subtle pt-4 [-webkit-overflow-scrolling:touch]">
           <Metric label="IS Sharpe" value={p.sharpe.toFixed(2)} />
           <Metric label="Max drawdown" value={percent(p.maxDrawdown)} />
           <Metric label="Win rate" value={percent(p.winRate, 0)} />
@@ -1383,40 +1702,7 @@ function SystemView({ snapshot }: { snapshot: DashboardSnapshot }) {
       </section>
       </Reveal>
       <Reveal>
-      <section className="panel overflow-hidden">
-        <div className="border-b border-subtle px-5 py-4">
-          <h2 className="section-title">Configuration & governance</h2>
-          <p className="mt-1 text-xs text-muted">Read-only. Enforced controls are visually separated from configuration-only rules.</p>
-        </div>
-        <div className="table-shell">
-          <table className="w-full min-w-[720px]">
-            <thead className="table-head">
-              <tr>
-                <th className="h-10 px-5">Control</th>
-                <th className="h-10 px-3">Value</th>
-                <th className="h-10 px-3">State</th>
-                <th className="h-10 px-5">Detail</th>
-              </tr>
-            </thead>
-            <tbody>
-              {snapshot.system.governance.map((row) => (
-                <tr className="table-row" key={row.name}>
-                  <td className="px-5 py-3 text-xs text-foreground">{row.name}</td>
-                  <td className="mono px-3 py-3 text-xs text-secondary">{row.value}</td>
-                  <td className="px-3 py-3">
-                    {row.state === "enforced" ? (
-                      <span className="font-mono text-[11px] text-positive">Enforced</span>
-                    ) : (
-                      <span className="font-mono text-[11px] text-warning">Configured · not enforced</span>
-                    )}
-                  </td>
-                  <td className="px-5 py-3 text-xs text-secondary">{row.detail}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+        <RiskGuardsPanel snapshot={snapshot} />
       </Reveal>
       <Reveal>
       <section className="panel p-5">

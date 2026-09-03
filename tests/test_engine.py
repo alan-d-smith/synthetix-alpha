@@ -3,7 +3,8 @@ import datetime as dt
 import pandas as pd
 import pytest
 
-from synthetix_alpha.strategy import EngineData, Spec, run
+from synthetix_alpha.strategy import EngineData, Spec
+from synthetix_alpha.strategy.engine import run
 from synthetix_alpha.strategy.engine import max_loss, select
 
 D0 = dt.date(2021, 3, 1)
