@@ -5,10 +5,10 @@
 @tailwind utilities;
 
 :root {
-  --canvas: #090B10;
-  --surface-1: #0E1219;
-  --surface-2: #141A24;
-  --surface-hover: #18202B;
+  --canvas: #050506;
+  --surface-1: #0C0E12;
+  --surface-2: #12151C;
+  --surface-hover: #171B24;
   --border-subtle: #252D3A;
   --border-strong: #323B4B;
   --text-primary: #F0F4F8;
@@ -19,7 +19,7 @@
   --positive: #59C58B;
   --negative: #EF6B72;
   --warning: #E5B45B;
-  --grid-line: rgba(76, 201, 233, 0.045);
+  --grid-line: rgba(76, 201, 233, 0.04);
   --z-sticky: 120;
   --z-backdrop: 520;
   --z-dialog: 640;
@@ -62,6 +62,7 @@ html {
   color: var(--text-primary);
   scrollbar-color: #3a4658 var(--canvas);
   scrollbar-width: thin;
+  scroll-padding-top: 4.5rem;
 }
 
 body {
@@ -75,8 +76,8 @@ body {
 .market-canvas {
   min-height: 100vh;
   background:
-    radial-gradient(1200px 520px at 12% -8%, rgba(76, 201, 233, 0.05), transparent 58%),
-    radial-gradient(880px 420px at 94% -4%, rgba(147, 132, 255, 0.035), transparent 50%),
+    radial-gradient(1200px 520px at 12% -8%, rgba(76, 201, 233, 0.045), transparent 58%),
+    radial-gradient(880px 420px at 94% -4%, rgba(147, 132, 255, 0.03), transparent 50%),
     var(--canvas);
 }
 
@@ -117,9 +118,9 @@ body {
   }
   .eyebrow { @apply text-[11px] font-medium uppercase tracking-[0.12em] text-muted; }
   .mono { @apply font-mono tabular-nums; }
-  .metric-line { @apply flex min-w-0 flex-col gap-1 border-r border-subtle px-5 last:border-r-0 first:pl-0; }
+  .metric-line { @apply flex min-w-[7.5rem] shrink-0 flex-col gap-1 border-r border-subtle px-4 last:border-r-0 first:pl-0 sm:min-w-0 sm:px-5; }
   .metric-label { @apply text-[11px] font-medium uppercase tracking-[0.1em] text-muted; }
-  .metric-value { @apply font-mono text-[22px] font-medium leading-[26px] tracking-[-0.04em] text-foreground tabular-nums; }
+  .metric-value { @apply font-mono text-[18px] font-medium leading-[24px] tracking-[-0.04em] text-foreground tabular-nums sm:text-[22px] sm:leading-[26px]; }
   .status-dot { @apply inline-block h-1.5 w-1.5 rounded-full; }
   .table-shell { @apply overflow-x-auto; scrollbar-gutter: stable; }
   .table-head { @apply sticky top-0 z-10 bg-surface text-left text-[11px] font-medium uppercase leading-4 tracking-[0.1em] text-muted; }

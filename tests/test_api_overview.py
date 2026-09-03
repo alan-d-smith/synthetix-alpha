@@ -82,6 +82,11 @@ def test_overview_response_shape() -> None:
     assert any("screener returned no candidates" in warning for warning in snapshot["warnings"])
     screen = next(stage for stage in snapshot["pipeline"]["stages"] if stage["stage"] == "SCREEN")
     assert screen["status"] == "pending"
+    governance = snapshot["system"]["governance"]
+    assert governance
+    assert any(row["name"] == "Max position slots" and row["state"] == "enforced" for row in governance)
+    assert any(row["name"] == "Sector concentration" and row["state"] == "configured_not_enforced" for row in governance)
+    assert any(row["name"] == "Stop-loss / take-profit" and row["state"] == "configured_not_enforced" for row in governance)
 
 
 def test_map_portfolio_without_buying_power_warning() -> None:

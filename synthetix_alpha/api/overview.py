@@ -3,9 +3,18 @@
 from __future__ import annotations
 
 import datetime as dt
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
 from synthetix_alpha.api.research import load_performance
+from synthetix_alpha.api.ttl_cache import (
+    CRITIQUE_TTL,
+    GATHER_TTL,
+    SCREEN_TTL,
+    critique_cache,
+    gather_cache,
+    screen_cache,
+)
 
 _PIPELINE_STAGES = [
     ("SCREEN", "Screen"),
@@ -170,31 +179,79 @@ def map_candidates(df: object, *, as_of: str) -> list[dict[str, Any]]:
     return out
 
 
+def _screen_cache_key(candidates_fn: Callable[[], object]) -> str | None:
+    """Only cache the live screener entry point — injected callables skip cache."""
+    from synthetix_alpha.live.screen import candidates as screen_candidates
+
+    if candidates_fn is screen_candidates:
+        return "screen:live"
+    return None
+
+
 def load_candidates(
     *,
     as_of: str,
     candidates_fn: Callable[[], object] | None = None,
+    use_cache: bool = True,
 ) -> tuple[list[dict[str, Any]], object, list[str]]:
     """Run the live screener and map results, returning warnings on failure or empty scan."""
     import pandas as pd
 
-    warnings: list[str] = []
     if candidates_fn is None:
-        # Match the CLI entry point (`python -m synthetix_alpha.live.screen`): call
-        # candidates() from screen.py directly, not via the live package re-exports.
         from synthetix_alpha.live.screen import candidates as screen_candidates
 
         candidates_fn = screen_candidates
 
-    try:
-        df = candidates_fn()
-    except Exception as exc:
-        return [], pd.DataFrame(), [f"Opportunity screener unavailable: {exc}"]
+    cache_key = _screen_cache_key(candidates_fn)
 
-    mapped = map_candidates(df, as_of=as_of)
-    if not mapped:
-        warnings.append("Opportunity screener returned no candidates in regime today.")
-    return mapped, df, warnings
+    def _load() -> tuple[list[dict[str, Any]], object, list[str]]:
+        warnings: list[str] = []
+        try:
+            df = candidates_fn()
+        except Exception as exc:
+            return [], pd.DataFrame(), [f"Opportunity screener unavailable: {exc}"]
+
+        mapped = map_candidates(df, as_of=as_of)
+        if not mapped:
+            warnings.append("Opportunity screener returned no candidates in regime today.")
+        return mapped, df, warnings
+
+    if use_cache and cache_key is not None:
+        cached = screen_cache.get(cache_key, SCREEN_TTL)
+        if cached is not None:
+            mapped, df, warnings = cached
+            return mapped, df, [*warnings, "Opportunity screener result served from in-process cache (45s TTL)."]
+        result = _load()
+        screen_cache.set(cache_key, result)
+        return result
+    return _load()
+
+
+def _gather_cache_key(screen_df: object) -> str:
+    import pandas as pd
+
+    if screen_df is None or not isinstance(screen_df, pd.DataFrame) or screen_df.empty:
+        return "gather:empty"
+    tickers = ",".join(sorted(str(t).upper() for t in screen_df.index))
+    return f"gather:{tickers}"
+
+
+def _critique_cache_key(inputs: list[Any]) -> str:
+    if not inputs:
+        return "critique:empty"
+    tickers = ",".join(sorted(str(getattr(inp, "ticker", "")).upper() for inp in inputs))
+    return f"critique:{tickers}"
+
+
+def _fetch_account_exposure(
+    account_fn: Callable[[], dict],
+    exposure_fn: Callable[[], dict],
+) -> tuple[dict, dict]:
+    """Fetch Alpaca account and exposure concurrently (independent read-only calls)."""
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="overview-alpaca") as pool:
+        account_future = pool.submit(account_fn)
+        exposure_future = pool.submit(exposure_fn)
+        return account_future.result(), exposure_future.result()
 
 
 def enrich_candidates_with_gather(
@@ -224,26 +281,43 @@ def apply_gather(
     screen_df: object,
     *,
     gather_fn: Callable[[object], tuple[list[Any], list[str]]] | None = None,
+    use_cache: bool = True,
 ) -> tuple[list[dict[str, Any]], list[str], list[str], list[Any]]:
     """Run GATHER for screened candidates; return enriched rows, errors, warnings, and inputs."""
     if not candidates:
         return candidates, [], [], []
 
+    using_default_gather = gather_fn is None
     if gather_fn is None:
         from synthetix_alpha.api.gather import run_gather
 
         gather_fn = run_gather
 
-    try:
-        inputs, errors = gather_fn(screen_df)
-    except Exception as exc:
-        return candidates, [], [f"Gather unavailable: {exc}"], []
+    cache_key = _gather_cache_key(screen_df)
+    should_cache = use_cache and using_default_gather
+
+    def _run() -> tuple[list[Any], list[str], list[str]]:
+        try:
+            inputs, errors = gather_fn(screen_df)
+            return inputs, errors, []
+        except Exception as exc:
+            return [], [], [f"Gather unavailable: {exc}"]
+
+    if should_cache:
+        cached = gather_cache.get(cache_key, GATHER_TTL)
+        if cached is not None:
+            inputs, errors, cached_warnings = cached
+        else:
+            inputs, errors, cached_warnings = _run()
+            gather_cache.set(cache_key, (inputs, errors, cached_warnings))
+    else:
+        inputs, errors, cached_warnings = _run()
 
     if inputs is None:
         inputs = []
 
     enriched = enrich_candidates_with_gather(candidates, inputs)
-    warnings: list[str] = []
+    warnings: list[str] = list(cached_warnings)
     if not inputs and errors:
         warnings.append("Gather returned no enriched candidates.")
     return enriched, errors, warnings, inputs
@@ -287,18 +361,34 @@ def apply_critique(
     *,
     critique_fn: Callable[[list[Any]], tuple[list[Any], str]] | None = None,
     confidence_threshold: int = _DEFAULT_CONFIDENCE_THRESHOLD,
+    use_cache: bool = True,
 ) -> tuple[list[dict[str, Any]], list[str], list[str], list[Any], str]:
     """Run CRITIQUE for gathered inputs; return enriched rows, errors, warnings, decisions, and mode."""
     if not inputs:
         return candidates, [], [], [], "none"
 
+    using_default_critique = critique_fn is None
     if critique_fn is None:
         from synthetix_alpha.api.critique import run_critique
 
         critique_fn = lambda gathered: run_critique(gathered, consistency=False)
 
+    cache_key = _critique_cache_key(inputs)
+    should_cache = use_cache and using_default_critique
+
+    def _run() -> tuple[list[Any], str]:
+        return critique_fn(inputs)
+
     try:
-        decisions, mode = critique_fn(inputs)
+        if should_cache:
+            cached = critique_cache.get(cache_key, CRITIQUE_TTL)
+            if cached is not None:
+                decisions, mode = cached
+            else:
+                decisions, mode = _run()
+                critique_cache.set(cache_key, (decisions, mode))
+        else:
+            decisions, mode = _run()
     except Exception as exc:
         return candidates, [f"CRITIQUE: {exc}"], [f"Critic unavailable: {exc}"], [], "none"
 
@@ -498,12 +588,35 @@ def build_pipeline_summary(
                 "status": risk_status if screen_count else "pending",
             })
         else:
-            stages.append({
-                "stage": stage,
-                "label": label,
-                "result": "Not available in adapter v1",
-                "status": "pending",
-            })
+            if stage == "EXECUTE":
+                if risk_approved_count > 0:
+                    stages.append({
+                        "stage": stage,
+                        "label": label,
+                        "result": "Dry-run only — constructed and risk-approved; live submission disabled",
+                        "status": "complete",
+                    })
+                elif formed_count > 0:
+                    stages.append({
+                        "stage": stage,
+                        "label": label,
+                        "result": "Dry-run only — order formed; risk gate did not approve",
+                        "status": "blocked",
+                    })
+                else:
+                    stages.append({
+                        "stage": stage,
+                        "label": label,
+                        "result": "Dry-run only — no order reached execution",
+                        "status": "pending" if screen_count else "pending",
+                    })
+            else:
+                stages.append({
+                    "stage": stage,
+                    "label": label,
+                    "result": "Not available in adapter v1",
+                    "status": "pending",
+                })
 
     events = [
         {
@@ -581,7 +694,88 @@ def empty_pipeline(as_of: str) -> dict[str, Any]:
     }
 
 
-def empty_system(as_of: str) -> dict[str, Any]:
+def build_governance(rules: Any) -> list[dict[str, str]]:
+    """Map runtime Rules (+ known config-only keys) into GovernanceControl rows."""
+    max_positions = getattr(rules, "max_open_positions", None)
+    premium_pct = getattr(rules, "max_premium_at_risk_pct", None)
+    daily_dd = getattr(rules, "max_daily_drawdown_pct", None)
+    total_dd = getattr(rules, "max_total_drawdown_pct", None)
+    single_pct = getattr(rules, "max_single_position_pct", None)
+    leverage = getattr(rules, "max_leverage", None)
+    defined_risk = getattr(rules, "defined_risk_only", None)
+
+    rows: list[dict[str, str]] = [
+        {
+            "name": "Max position slots",
+            "value": str(max_positions) if max_positions is not None else "Unavailable",
+            "state": "enforced",
+            "detail": "Hard limit on concurrent option structures.",
+        },
+        {
+            "name": "Premium at risk",
+            "value": f"{premium_pct:.0%} of NAV" if isinstance(premium_pct, (int, float)) else "Unavailable",
+            "state": "enforced",
+            "detail": "Per-trade max loss versus account equity.",
+        },
+        {
+            "name": "Daily drawdown halt",
+            "value": f"{daily_dd:.0%}" if isinstance(daily_dd, (int, float)) else "Unavailable",
+            "state": "enforced",
+            "detail": "Blocks new risk when daily mark-to-market drawdown trips.",
+        },
+        {
+            "name": "Total drawdown halt",
+            "value": f"{total_dd:.0%}" if isinstance(total_dd, (int, float)) else "Unavailable",
+            "state": "enforced",
+            "detail": "Blocks new risk when peak-to-trough drawdown trips.",
+        },
+        {
+            "name": "Single-position cap",
+            "value": f"{single_pct:.0%} of NAV" if isinstance(single_pct, (int, float)) else "Unavailable",
+            "state": "enforced",
+            "detail": "Combined risk for one underlying versus NAV.",
+        },
+        {
+            "name": "Max leverage",
+            "value": f"{leverage:.2f}×" if isinstance(leverage, (int, float)) else "Unavailable",
+            "state": "enforced",
+            "detail": "Total notional versus account equity.",
+        },
+        {
+            "name": "Defined-risk only",
+            "value": "Required" if defined_risk is True else "Off" if defined_risk is False else "Unavailable",
+            "state": "enforced",
+            "detail": "Undefined-risk option structures are rejected.",
+        },
+        {
+            "name": "Sector concentration",
+            "value": "Configured",
+            "state": "configured_not_enforced",
+            "detail": "Present in governance.yaml; runtime does not enforce.",
+        },
+        {
+            "name": "Weekly drawdown",
+            "value": "Configured",
+            "state": "configured_not_enforced",
+            "detail": "Present in governance.yaml; runtime does not enforce.",
+        },
+        {
+            "name": "Stop-loss / take-profit",
+            "value": "Strategy research only",
+            "state": "configured_not_enforced",
+            "detail": "Backtest exit rules exist on strategy specs; live paper runtime does not auto-exit on SL/TP.",
+        },
+        {
+            "name": "Paper trading only",
+            "value": "Required",
+            "state": "enforced",
+            "detail": "Dashboard adapter accepts dry-run pipeline requests only.",
+        },
+    ]
+    return rows
+
+
+def empty_system(as_of: str, rules: Any | None = None) -> dict[str, Any]:
     return {
         "api": {
             "source": "Dashboard adapter",
@@ -598,8 +792,77 @@ def empty_system(as_of: str) -> dict[str, Any]:
             }
         ],
         "warnings": ["Full system health probes are not implemented in adapter v1."],
-        "governance": [],
+        "governance": build_governance(rules) if rules is not None else [],
     }
+
+
+def map_formed_order_to_frontend(order: dict[str, Any]) -> dict[str, Any]:
+    """Map a pipeline formed-order dict into frontend Order fields."""
+    legs = list(order.get("legs") or [])
+    resolved = bool(legs) and all(leg.get("resolved") for leg in legs if isinstance(leg, dict))
+    return {
+        "symbol": str(order.get("symbol", "")),
+        "legs": [
+            {
+                "symbol": str(leg.get("symbol", "")),
+                "side": leg.get("side", "short"),
+                "ratio": int(leg.get("ratio", 1)),
+                "type": leg.get("type", "put"),
+                "strike": leg.get("strike"),
+                "delta": leg.get("delta"),
+                "dteOffset": leg.get("dte_offset"),
+                "resolved": bool(leg.get("resolved")),
+            }
+            for leg in legs
+            if isinstance(leg, dict)
+        ],
+        "contracts": int(order.get("contracts", 1)),
+        "limitPrice": order.get("limit_price"),
+        "clientOrderId": str(order.get("client_order_id", "")),
+        "maxLoss": float(order.get("max_loss") or 0),
+        "definedRisk": bool(order.get("defined_risk", True)),
+        "confidence": int(order.get("confidence") or 0),
+        "thesis": str(order.get("thesis") or ""),
+        "resolution": "resolved" if resolved else ("placeholder" if legs else "unavailable"),
+    }
+
+
+def attach_pipeline_outcomes(
+    candidates: list[dict[str, Any]],
+    *,
+    formed_orders: list[dict],
+    risk_decision: Any,
+    risk_halts: list[str],
+) -> list[dict[str, Any]]:
+    """Merge FORM/RISK outcomes into candidate rows for truthful UI display."""
+    orders_by_symbol = {str(order.get("symbol", "")).upper(): order for order in formed_orders}
+    approved_symbols = {
+        str(order.get("symbol", order.get("underlying", ""))).upper()
+        for order in (getattr(risk_decision, "approved", []) or [])
+    }
+
+    def risk_for(sym: str) -> str | None:
+        upper = sym.upper()
+        if upper in approved_symbols:
+            return "APPROVED"
+        if any(upper in halt for halt in risk_halts):
+            return "HALTED"
+        if upper in orders_by_symbol:
+            return "PENDING"
+        return None
+
+    enriched: list[dict[str, Any]] = []
+    for cand in candidates:
+        merged = dict(cand)
+        sym = str(cand["ticker"]).upper()
+        order = orders_by_symbol.get(sym)
+        if order is not None:
+            merged["order"] = map_formed_order_to_frontend(order)
+        risk_status = risk_for(sym)
+        if risk_status is not None:
+            merged["risk"] = risk_status
+        enriched.append(merged)
+    return enriched
 
 
 def build_overview(
@@ -612,6 +875,7 @@ def build_overview(
     critique_fn: Callable[[list[Any]], tuple[list[Any], str]] | None = None,
     form_fn: Callable[[list[Any], object], list[dict]] | None = None,
     risk_fn: Callable[[list[dict]], Any] | None = None,
+    use_cache: bool = True,
 ) -> dict[str, Any]:
     """Assemble DashboardSnapshot JSON with a real portfolio slice."""
     if account_fn is None or exposure_fn is None or rules_loader is None:
@@ -627,21 +891,28 @@ def build_overview(
     # Screen before Alpaca CLI account/position reads. The CLI path runs candidates()
     # with no prior account calls; hitting the CLI first can starve the SDK liquidity
     # fetch inside candidates() and yield an empty scan in the adapter only.
-    candidates, screen_df, candidate_warnings = load_candidates(as_of=as_of, candidates_fn=candidates_fn)
+    candidates, screen_df, candidate_warnings = load_candidates(
+        as_of=as_of,
+        candidates_fn=candidates_fn,
+        use_cache=use_cache,
+    )
     screened_count = len(candidates)
 
-    account = account_fn()
-    exposure = exposure_fn()
+    account, exposure = _fetch_account_exposure(account_fn, exposure_fn)
     rules = rules_loader()
 
     portfolio, portfolio_warnings = map_portfolio(account, exposure, rules, as_of=as_of)
     candidates, gather_errors, gather_warnings, gather_inputs = apply_gather(
-        candidates, screen_df, gather_fn=gather_fn
+        candidates,
+        screen_df,
+        gather_fn=gather_fn,
+        use_cache=use_cache,
     )
     candidates, critique_errors, critique_warnings, critique_decisions, critique_mode = apply_critique(
         candidates,
         gather_inputs,
         critique_fn=critique_fn,
+        use_cache=use_cache,
     )
     formed_orders, form_errors, form_warnings = apply_form(
         screen_df,
@@ -652,9 +923,11 @@ def build_overview(
     if risk_fn is None:
         from synthetix_alpha.api.risk_gate import run_risk
 
+        cached_exposure = exposure
+
         risk_fn = lambda orders: run_risk(
             orders,
-            exposure_fn=exposure_fn,
+            exposure_fn=lambda: cached_exposure,
             rules_loader=rules_loader,
         )
     risk_decision, risk_halts, risk_warnings, risk_errors = apply_risk(
@@ -663,6 +936,12 @@ def build_overview(
     )
     risk_approved_count = len(getattr(risk_decision, "approved", []) or [])
     risk_halt_count = len(risk_halts)
+    candidates = attach_pipeline_outcomes(
+        candidates,
+        formed_orders=formed_orders,
+        risk_decision=risk_decision,
+        risk_halts=risk_halts,
+    )
     gathered_tickers = [
         cand["ticker"]
         for cand in candidates
@@ -706,5 +985,5 @@ def build_overview(
         "portfolio": portfolio,
         "executions": [],
         "performance": performance,
-        "system": empty_system(as_of),
+        "system": empty_system(as_of, rules),
     }

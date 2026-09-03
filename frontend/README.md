@@ -6,12 +6,12 @@ Next.js command center for autonomous, risk-gated paper options trading. The UI 
 
 | Path | Screen |
 | --- | --- |
-| `/` | Command Center |
-| `/pipeline` | Pipeline audit / Signal Trace |
-| `/opportunities` | Opportunity table + inspector |
-| `/portfolio` | Account posture + execution ledger |
-| `/research` | Historical research evidence |
-| `/system` | Source health + governance |
+| `/` | Continuous Command Center (Overview → Pipeline → Opportunities → Portfolio → Research → System) |
+| `/pipeline` | Pipeline audit / Signal Trace (standalone) |
+| `/opportunities` | Opportunity table + inspector (standalone) |
+| `/portfolio` | Account posture + execution ledger (standalone) |
+| `/research` | Historical research evidence (standalone) |
+| `/system` | Source health + governance (standalone) |
 
 ## Run
 
