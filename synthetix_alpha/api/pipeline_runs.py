@@ -101,4 +101,17 @@ def run_dry_pipeline(
 
     orchestrator = orchestrator_factory()
     result = orchestrator.run_daily(iv_rv_min=iv_rv_min, limit=limit, dry_run=True)
+
+    # Cache risk-approved formed orders for later operator paper submission.
+    try:
+        from synthetix_alpha.api.trades import cache_overview_trades
+
+        cache_overview_trades(
+            formed_orders=list(getattr(result, "formed_orders", []) or []),
+            risk_decision=getattr(result, "risk_decision", None),
+            critique_decisions=list(getattr(result, "decisions", []) or []),
+        )
+    except Exception:
+        pass
+
     return serialize_pipeline_result(result)

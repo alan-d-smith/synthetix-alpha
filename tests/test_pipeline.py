@@ -270,7 +270,13 @@ def test_cross_module_pipeline() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_form_orders_without_chain() -> None:
+def test_form_orders_without_chain(monkeypatch) -> None:
+    import synthetix_alpha.api.leg_resolution as lr
+
+    monkeypatch.setattr(lr, "resolve_via_alpaca_chain", lambda *a, **k: [])
+    monkeypatch.setattr(lr, "resolve_via_alpaca_contracts", lambda *a, **k: [])
+    monkeypatch.setattr(lr, "resolve_via_dolt", lambda *a, **k: [])
+
     orch = PipelineOrchestrator(mock_llm=True)
     decisions = [
         CriticDecision(
@@ -291,6 +297,7 @@ def test_form_orders_without_chain() -> None:
     assert o["max_loss"] == pytest.approx(2000.0)
     assert o["confidence"] == 80
     assert len(o["legs"]) == 2
+    assert o["executable"] is False
 
 
 def test_execute_orders_delegates_to_execution(monkeypatch) -> None:
@@ -332,34 +339,46 @@ def test_execute_orders_delegates_to_execution(monkeypatch) -> None:
 
 
 def test_resolve_legs_abstract(monkeypatch) -> None:
-    """Falls back to placeholder symbols when no chain data is available.
-
-    The chain has to be stubbed out. Without this the test only passes on a machine with no
-    datasets/ present, and silently flips to the resolved-OCC path anywhere data exists.
-    """
+    """Falls back to placeholder symbols when no chain data is available."""
+    import synthetix_alpha.api.leg_resolution as lr
     import synthetix_alpha.strategy.data as sdata
+
     monkeypatch.setattr(sdata, "build", lambda *a, **k: (pd.DataFrame(), pd.DataFrame()))
+    monkeypatch.setattr(lr, "resolve_via_alpaca_chain", lambda *a, **k: [])
+    monkeypatch.setattr(lr, "resolve_via_alpaca_contracts", lambda *a, **k: [])
     orch = PipelineOrchestrator(mock_llm=True)
     spec = orch._get_spec()
     legs = orch._resolve_legs(spec, "SPY", pd.DataFrame())
     assert len(legs) == 2
     assert all("OCC_PLACEHOLDER" in l["symbol"] for l in legs)
+    assert all(l.get("resolved") is False for l in legs)
 
 
-def test_resolve_legs_uses_real_symbols_when_chain_is_available() -> None:
-    """The counterpart path, which is the one that runs live. Skipped where there is no chain to load."""
+def test_resolve_legs_uses_real_symbols_when_chain_is_available(monkeypatch) -> None:
+    """Resolved path emits real OCC symbols (not placeholders)."""
     import pytest
 
+    from synthetix_alpha.api.leg_resolution import is_valid_occ_symbol, legs_are_executable
     from synthetix_alpha.strategy.data import build as build_chain
+
     try:
         chains, _ = build_chain("SPY", source="dolt")
     except Exception as e:
         pytest.skip(f"no chain data available: {type(e).__name__}")
     if chains.empty:
         pytest.skip("no chain data available")
+
+    import synthetix_alpha.api.leg_resolution as lr
+
+    # Prefer dolt path for this unit test (deterministic offline data).
+    monkeypatch.setattr(lr, "resolve_via_alpaca_chain", lambda *a, **k: [])
+    monkeypatch.setattr(lr, "resolve_via_alpaca_contracts", lambda *a, **k: [])
+
     orch = PipelineOrchestrator(mock_llm=True)
-    legs = orch._resolve_legs(orch._get_spec(), "SPY", pd.DataFrame())
+    legs = orch._resolve_legs(orch._get_spec(), "SPY", pd.DataFrame({"price": [500.0]}, index=["SPY"]))
     assert len(legs) == 2
+    assert legs_are_executable(legs)
+    assert all(is_valid_occ_symbol(l["symbol"]) for l in legs)
     assert all("OCC_PLACEHOLDER" not in l["symbol"] for l in legs)
 
 

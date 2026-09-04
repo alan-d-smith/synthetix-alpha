@@ -309,34 +309,51 @@ class PipelineOrchestrator:
     ) -> list[dict]:
         """Convert critic decisions into option order dicts with leg structures.
 
-        Resolves strategy legs (delta/moneyness/width) against the option chain.
-        When chain data is unavailable, records the leg descriptions as abstract
-        placeholders so the pipeline still validates through risk/execution.
+        Resolves strategy legs (delta/moneyness/width) against live Alpaca chains
+        (preferred) or historical dolt data. Unresolvable legs stay as placeholders
+        and cannot be submitted.
         """
+        from synthetix_alpha.api.leg_resolution import (
+            estimate_credit_and_max_loss,
+            legs_are_executable,
+            resolve_legs,
+        )
+
         spec = self._get_spec()
         orders: list[dict] = []
 
         for d in approved:
             ticker = d.ticker
-            legs = self._resolve_legs(spec, ticker, candidates)
-            coid = execution.client_order_id(legs) if legs else ""
-            max_loss = 2000.0 * d.suggested_size_multiplier
+            legs = resolve_legs(spec, ticker, candidates)
+            executable = legs_are_executable(legs)
+            coid = execution.client_order_id(legs) if executable else ""
+            contracts = 1
+            if executable:
+                limit_price, max_loss = estimate_credit_and_max_loss(legs, contracts)
+                max_loss = max_loss * float(d.suggested_size_multiplier or 1.0)
+            else:
+                limit_price = 0.0
+                max_loss = 2000.0 * float(d.suggested_size_multiplier or 1.0)
 
             order = {
                 "symbol": ticker,
                 "legs": legs,
-                "contracts": 1,
-                "limit_price": 0.0,
+                "contracts": contracts,
+                "limit_price": limit_price,
                 "client_order_id": coid,
                 "defined_risk": True,
                 "max_loss": max_loss,
                 "confidence": d.confidence,
                 "thesis": d.thesis,
+                "structure": "put_credit_spread" if all(
+                    leg.get("type") == "put" for leg in legs if leg.get("type") != "stock"
+                ) else "multi_leg",
+                "executable": executable,
             }
             orders.append(order)
             logger.info(
-                "Formed order %s: %d legs, max_loss=%.0f, coid=%s",
-                ticker, len(legs), max_loss, coid or "(pending)",
+                "Formed order %s: %d legs, executable=%s, max_loss=%.0f, coid=%s",
+                ticker, len(legs), executable, max_loss, coid or "(pending)",
             )
 
         return orders
@@ -347,100 +364,10 @@ class PipelineOrchestrator:
         ticker: str,
         candidates: pd.DataFrame,
     ) -> list[dict]:
-        """Attempt to resolve abstract leg definitions to concrete OCC symbols.
+        """Resolve abstract leg definitions to concrete OCC symbols when possible."""
+        from synthetix_alpha.api.leg_resolution import resolve_legs
 
-        When the option chain is not available (no kaggle/dolt data loaded),
-        returns abstract leg descriptions with OCC symbols set as placeholders.
-        The execution gateway logs a clear warning and skips these orders,
-        preserving the architectural firewall.
-        """
-        abstract_legs: list[dict] = []
-        for leg in spec.legs:
-            if leg.type == "stock":
-                abstract_legs.append({
-                    "symbol": ticker,
-                    "side": leg.side,
-                    "ratio": leg.ratio,
-                    "type": "stock",
-                })
-            else:
-                abstract_legs.append({
-                    "symbol": f"{ticker}_OCC_PLACEHOLDER",
-                    "side": leg.side,
-                    "ratio": leg.ratio,
-                    "type": leg.type,
-                    "delta": leg.delta,
-                    "moneyness": leg.moneyness,
-                    "width": leg.width,
-                    "dte_offset": leg.dte_offset,
-                })
-
-        # Try to resolve via strategy engine chain data if available
-        try:
-            from synthetix_alpha.strategy.data import build as build_chain
-
-            chains, features = build_chain(ticker, source="dolt")
-            if chains.empty:
-                return abstract_legs
-
-            # Find the nearest expiration matching the spec's DTE target
-            chains_df = chains.reset_index()
-            chains_df["dte"] = (
-                pd.to_datetime(chains_df["expiration"])
-                - pd.to_datetime(chains_df["date"])
-            ).dt.days
-            target_dte = getattr(spec, "dte_target", 45)
-            near = chains_df[chains_df["dte"].between(target_dte - 10, target_dte + 10)]
-            if near.empty:
-                return abstract_legs
-
-            latest_date = near["date"].max()
-            latest = near[near["date"] == latest_date]
-            spot = float(latest["underlying_price"].iloc[0])
-
-            resolved: list[dict] = []
-            for leg in spec.legs:
-                if leg.type == "stock":
-                    resolved.append({
-                        "symbol": ticker,
-                        "side": leg.side,
-                        "ratio": leg.ratio,
-                        "type": "stock",
-                    })
-                    continue
-
-                # Determine strike
-                strike = None
-                if leg.delta is not None:
-                    opts = latest[latest["type"] == leg.type].copy()
-                    opts["dist"] = (opts["delta"].abs() - abs(leg.delta)).abs()
-                    row = opts.nsmallest(1, "dist").iloc[0]
-                    strike = float(row["strike"])
-                elif leg.moneyness is not None:
-                    strike = spot * (1 + leg.moneyness)
-                elif leg.width is not None and resolved:
-                    prev_strike = resolved[-1].get("strike", spot)
-                    strike = prev_strike + leg.width
-
-                if strike is None:
-                    continue
-
-                resolved.append({
-                    "symbol": f"{ticker}_OCC_RESOLVED",
-                    "side": leg.side,
-                    "ratio": leg.ratio,
-                    "type": leg.type,
-                    "strike": strike,
-                    "dte_offset": leg.dte_offset,
-                })
-
-            return resolved if resolved else abstract_legs
-
-        except Exception:
-            logger.debug(
-                "Chain resolution unavailable for %s - using abstract legs", ticker
-            )
-            return abstract_legs
+        return resolve_legs(spec, ticker, candidates)
 
     def _apply_risk_gate(self, orders: list[dict]) -> object:
         """Run formed orders through the deterministic risk gate."""
@@ -468,6 +395,8 @@ class PipelineOrchestrator:
         Orders with resolved OCC legs use the deterministic client_order_id
         from the formed order dict.
         """
+        from synthetix_alpha.api.leg_resolution import legs_are_executable
+
         results: list[dict] = []
         for o in orders:
             legs = o.get("legs") or []
@@ -476,21 +405,17 @@ class PipelineOrchestrator:
             coid = o.get("client_order_id", "")
             symbol = o.get("symbol", "?")
 
-            # Check if any leg is a placeholder
-            has_placeholder = any(
-                "_OCC_PLACEHOLDER" in str(l.get("symbol", "")) for l in legs
-            )
-            if not legs or has_placeholder:
+            if not legs_are_executable(legs):
                 logger.warning(
                     "Skipping execution for %s - no resolved option legs "
-                    "(run through strategy engine with chain data first)",
+                    "(Alpaca/dolt chain resolution required before paper submission)",
                     symbol,
                 )
                 results.append({
                     "symbol": symbol,
                     "client_order_id": coid or "pending",
                     "status": "skipped_no_legs",
-                    "detail": "resolve legs via strategy engine before live execution",
+                    "detail": "resolve legs via Alpaca option chain before paper execution",
                 })
                 continue
 

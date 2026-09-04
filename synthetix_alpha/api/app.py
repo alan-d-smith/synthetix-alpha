@@ -1,4 +1,4 @@
-"""FastAPI dashboard adapter — read-only portfolio overview for the Next.js frontend."""
+"""FastAPI dashboard adapter — portfolio overview + operator paper execution."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from synthetix_alpha.api.overview import build_overview
 from synthetix_alpha.api.overview_service import start_prewarm
 from synthetix_alpha.api.pipeline_runs import run_dry_pipeline
+from synthetix_alpha.api.trades import TradeSubmissionError, approve_and_submit, get_trade_status
 
 # Local Next.js + production Vercel frontend. Override with comma-separated CORS_ORIGINS.
 _DEFAULT_CORS_ORIGINS = (
@@ -52,7 +53,7 @@ def overview() -> dict:
 
 @app.post("/v1/pipeline/runs")
 def create_pipeline_run(payload: dict = Body(default_factory=dict)) -> dict:
-    """Accept dry-run pipeline requests only. Never submits live brokerage orders."""
+    """Accept dry-run pipeline requests only. Never submits brokerage orders."""
     dry_run = payload.get("dryRun", True)
     if dry_run is not True:
         raise HTTPException(
@@ -66,3 +67,30 @@ def create_pipeline_run(payload: dict = Body(default_factory=dict)) -> dict:
         )
     except Exception as exc:  # noqa: BLE001 — surface adapter failure honestly
         raise HTTPException(status_code=502, detail=f"Dry pipeline failed: {exc}") from exc
+
+
+@app.post("/v1/trades/approve-and-submit")
+def trades_approve_and_submit(payload: dict = Body(default_factory=dict)) -> dict:
+    """Operator-approved PAPER submission for a server-side risk-approved trade."""
+    try:
+        return approve_and_submit(
+            symbol=payload.get("symbol"),
+            client_order_id=payload.get("clientOrderId") or payload.get("client_order_id"),
+        )
+    except TradeSubmissionError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": exc.message, **exc.extra},
+        ) from exc
+
+
+@app.get("/v1/trades/{order_id}")
+def trades_get_status(order_id: str) -> dict:
+    """Truthful Alpaca paper order status — never fabricates fills."""
+    try:
+        return get_trade_status(order_id)
+    except TradeSubmissionError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": exc.message, **exc.extra},
+        ) from exc

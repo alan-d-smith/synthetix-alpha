@@ -489,6 +489,8 @@ def build_pipeline_summary(
     risk_halts: list[str] | None = None,
     risk_errors: list[str] | None = None,
     confidence_threshold: int = _DEFAULT_CONFIDENCE_THRESHOLD,
+    executable_count: int = 0,
+    execution_status: str | None = None,
 ) -> dict[str, Any]:
     """Build a minimal live pipeline summary through CRITIQUE, FORM, and RISK."""
     pipeline_id = f"overview-{as_of[:19].replace(':', '').replace('-', '')}"
@@ -589,25 +591,68 @@ def build_pipeline_summary(
             })
         else:
             if stage == "EXECUTE":
-                if risk_approved_count > 0:
+                ready = risk_approved_count > 0 and executable_count > 0
+                if execution_status == "submitted":
                     stages.append({
                         "stage": stage,
                         "label": label,
-                        "result": "Dry-run only — constructed and risk-approved; live submission disabled",
+                        "result": "Submitted to Alpaca paper — awaiting broker confirmation",
                         "status": "complete",
+                    })
+                elif execution_status == "pending":
+                    stages.append({
+                        "stage": stage,
+                        "label": label,
+                        "result": "Pending broker confirmation",
+                        "status": "active",
+                    })
+                elif execution_status == "filled":
+                    stages.append({
+                        "stage": stage,
+                        "label": label,
+                        "result": "Filled (Alpaca confirmed)",
+                        "status": "complete",
+                    })
+                elif execution_status == "rejected":
+                    stages.append({
+                        "stage": stage,
+                        "label": label,
+                        "result": "Rejected by broker",
+                        "status": "blocked",
+                    })
+                elif execution_status == "error":
+                    stages.append({
+                        "stage": stage,
+                        "label": label,
+                        "result": "Execution error",
+                        "status": "blocked",
+                    })
+                elif ready:
+                    stages.append({
+                        "stage": stage,
+                        "label": label,
+                        "result": "Ready for review — awaiting operator approval",
+                        "status": "active",
+                    })
+                elif risk_approved_count > 0:
+                    stages.append({
+                        "stage": stage,
+                        "label": label,
+                        "result": "Blocked — risk-approved but option legs unresolved",
+                        "status": "blocked",
                     })
                 elif formed_count > 0:
                     stages.append({
                         "stage": stage,
                         "label": label,
-                        "result": "Dry-run only — order formed; risk gate did not approve",
+                        "result": "Blocked — order formed; risk gate did not approve",
                         "status": "blocked",
                     })
                 else:
                     stages.append({
                         "stage": stage,
                         "label": label,
-                        "result": "Dry-run only — no order reached execution",
+                        "result": "No order reached execution",
                         "status": "pending" if screen_count else "pending",
                     })
             else:
@@ -769,7 +814,7 @@ def build_governance(rules: Any) -> list[dict[str, str]]:
             "name": "Paper trading only",
             "value": "Required",
             "state": "enforced",
-            "detail": "Dashboard adapter accepts dry-run pipeline requests only.",
+            "detail": "Dashboard adapter accepts operator-approved paper submissions only.",
         },
     ]
     return rows
@@ -798,8 +843,11 @@ def empty_system(as_of: str, rules: Any | None = None) -> dict[str, Any]:
 
 def map_formed_order_to_frontend(order: dict[str, Any]) -> dict[str, Any]:
     """Map a pipeline formed-order dict into frontend Order fields."""
+    from synthetix_alpha.api.leg_resolution import legs_are_executable
+
     legs = list(order.get("legs") or [])
-    resolved = bool(legs) and all(leg.get("resolved") for leg in legs if isinstance(leg, dict))
+    executable = bool(order.get("executable")) or legs_are_executable(legs)
+    resolved = executable
     return {
         "symbol": str(order.get("symbol", "")),
         "legs": [
@@ -811,7 +859,9 @@ def map_formed_order_to_frontend(order: dict[str, Any]) -> dict[str, Any]:
                 "strike": leg.get("strike"),
                 "delta": leg.get("delta"),
                 "dteOffset": leg.get("dte_offset"),
-                "resolved": bool(leg.get("resolved")),
+                "resolved": bool(leg.get("resolved")) or (
+                    executable and "OCC_PLACEHOLDER" not in str(leg.get("symbol", ""))
+                ),
             }
             for leg in legs
             if isinstance(leg, dict)
@@ -823,7 +873,9 @@ def map_formed_order_to_frontend(order: dict[str, Any]) -> dict[str, Any]:
         "definedRisk": bool(order.get("defined_risk", True)),
         "confidence": int(order.get("confidence") or 0),
         "thesis": str(order.get("thesis") or ""),
+        "structure": str(order.get("structure") or "put_credit_spread"),
         "resolution": "resolved" if resolved else ("placeholder" if legs else "unavailable"),
+        "executable": executable,
     }
 
 
@@ -936,6 +988,21 @@ def build_overview(
     )
     risk_approved_count = len(getattr(risk_decision, "approved", []) or [])
     risk_halt_count = len(risk_halts)
+    from synthetix_alpha.api.leg_resolution import legs_are_executable
+    from synthetix_alpha.api.trades import cache_overview_trades
+    from synthetix_alpha.api import trade_store
+
+    executable_count = sum(
+        1
+        for order in (getattr(risk_decision, "approved", []) or [])
+        if legs_are_executable(order.get("legs"))
+    )
+    cache_overview_trades(
+        formed_orders=formed_orders,
+        risk_decision=risk_decision,
+        critique_decisions=critique_decisions,
+        candidates=candidates,
+    )
     candidates = attach_pipeline_outcomes(
         candidates,
         formed_orders=formed_orders,
@@ -947,6 +1014,8 @@ def build_overview(
         for cand in candidates
         if cand.get("company") or cand.get("headlines")
     ]
+    recent_executions = trade_store.list_executions()
+    latest_status = recent_executions[0]["status"] if recent_executions else None
     pipeline = build_pipeline_summary(
         as_of=as_of,
         screen_count=screened_count,
@@ -962,6 +1031,8 @@ def build_overview(
         risk_halt_count=risk_halt_count,
         risk_halts=risk_halts,
         risk_errors=risk_errors,
+        executable_count=executable_count,
+        execution_status=latest_status,
     )
     performance, performance_warnings = load_performance()
     warnings = [
@@ -983,7 +1054,7 @@ def build_overview(
         "pipeline": pipeline,
         "candidates": candidates,
         "portfolio": portfolio,
-        "executions": [],
+        "executions": recent_executions,
         "performance": performance,
         "system": empty_system(as_of, rules),
     }

@@ -1,7 +1,17 @@
 export type DataMode = "mock" | "paper" | "live" | "stale";
 export type DecisionStatus = "APPROVED" | "REJECTED" | "PENDING";
 export type RiskStatus = "APPROVED" | "HALTED" | "PENDING" | "UNAVAILABLE";
-export type ExecutionStatus = "dry_run" | "skipped_no_legs" | "duplicate" | "submitted" | "error" | "unavailable";
+export type ExecutionStatus =
+  | "dry_run"
+  | "skipped_no_legs"
+  | "duplicate"
+  | "submitted"
+  | "pending"
+  | "filled"
+  | "rejected"
+  | "cancelled"
+  | "error"
+  | "unavailable";
 export type FreshnessStatus = "fresh" | "refreshing" | "delayed" | "unavailable";
 export type ResearchSource = "historical" | "in_sample" | "out_of_sample" | "mock" | "paper";
 export type PipelineStage = "SCREEN" | "GATHER" | "CRITIQUE" | "FORM" | "RISK" | "EXECUTE";
@@ -44,7 +54,9 @@ export interface Order {
   definedRisk: boolean;
   confidence: number;
   thesis: string;
+  structure?: string;
   resolution: "resolved" | "placeholder" | "unavailable";
+  executable?: boolean;
 }
 
 export interface RiskDecision {
@@ -82,6 +94,8 @@ export interface Execution {
   detail: string;
   createdAt: string;
   orderId?: string;
+  structure?: string;
+  quantity?: number;
 }
 
 export interface Position {

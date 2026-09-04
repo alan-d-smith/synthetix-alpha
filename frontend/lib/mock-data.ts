@@ -28,7 +28,9 @@ function placeholderOrder(symbol: string, confidence: number, maxLoss: number, t
     definedRisk: true,
     confidence,
     thesis,
+    structure: "put_credit_spread",
     resolution: "placeholder",
+    executable: false,
     legs: [
       { symbol: `${symbol}_OCC_PLACEHOLDER`, side: "short", ratio: 1, type: "put", delta: 0.2, dteOffset: 0, resolved: false },
       { symbol: `${symbol}_OCC_PLACEHOLDER`, side: "long", ratio: 1, type: "put", delta: 0.1, dteOffset: 0, resolved: false },

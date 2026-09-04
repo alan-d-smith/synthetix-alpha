@@ -43,3 +43,10 @@ NEXT_PUBLIC_DASHBOARD_API_URL=http://127.0.0.1:8000
 The adapter endpoint expected by `lib/api.ts` is `GET /v1/overview`. When that request fails, the frontend remains in demo mode rather than inventing live fills or portfolio Greeks.
 
 `POST /v1/pipeline/runs` is reserved for a dry pipeline request. The button stays disabled in demo mode and only succeeds when the adapter can guarantee dry-run semantics.
+
+Operator paper submission (never live):
+
+- `POST /v1/trades/approve-and-submit` — submit a server-side critic+risk approved trade to Alpaca paper
+- `GET /v1/trades/{order_id}` — truthful Alpaca order status
+
+SAFE LOCAL PATH: keep using dry pipeline by default. Paper submission only happens when an operator clicks **Submit to Alpaca Paper** in the Opportunities inspector. No credentials are accepted by the browser.

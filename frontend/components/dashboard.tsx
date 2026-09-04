@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "motion/react";
 import { Check, ChevronDown, Copy, Database, LoaderCircle, Play, ShieldCheck, TriangleAlert, X } from "lucide-react";
-import { requestDryPipeline, type DryPipelineResponse } from "@/lib/api";
+import { requestDryPipeline, submitPaperTrade, type DryPipelineResponse, type PaperSubmitResponse } from "@/lib/api";
 import { useDashboard } from "@/lib/dashboard-context";
 import type {
   Candidate,
@@ -24,6 +24,21 @@ import { PerformanceCharts, ResearchBars } from "@/components/charts/synthetix-c
 type Page = "command" | "pipeline" | "opportunities" | "portfolio" | "research" | "system";
 type SortKey = "iv" | "hv" | "ivRv" | "ivRank" | "liquidity" | "confidence" | "updated";
 type DryRunState = "idle" | "running" | "success" | "error";
+type SubmitState = "idle" | "confirm" | "submitting" | "success" | "error";
+
+function isPaperExecutable(candidate: Candidate | null | undefined): boolean {
+  if (!candidate) return false;
+  const order = candidate.order;
+  return (
+    candidate.critic.decision === "APPROVED" &&
+    candidate.risk === "APPROVED" &&
+    Boolean(order) &&
+    order!.resolution === "resolved" &&
+    (order!.executable !== false) &&
+    order!.legs.length > 0 &&
+    order!.legs.every((leg) => leg.resolved)
+  );
+}
 
 const stageColors: Record<string, string> = {
   complete: "bg-cyan",
@@ -234,10 +249,21 @@ function StatusBrandBar({ title, subtitle, snapshot }: { title: string; subtitle
         </div>
         <div className="mt-4 grid gap-3 border-t border-subtle pt-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatusChip label="Connection" value={connection.label} tone={connection.tone} detail={connection.detail} />
-          <StatusChip label="Operating mode" value="Copilot" tone="text-cyan" detail="AI proposes; operator runs dry pipeline. No autonomous trading loop." />
+          <StatusChip
+            label="Operating mode"
+            value="Copilot"
+            tone="text-cyan"
+            detail="AI proposes; operator reviews and may submit PAPER trades. No autonomous trading loop."
+          />
           <StatusChip
             label="Pipeline"
-            value={snapshot.pipeline.finalState === "partial" ? "Execution limited" : snapshot.pipeline.finalState}
+            value={
+              snapshot.pipeline.stages.find((s) => s.stage === "EXECUTE")?.status === "active"
+                ? "Awaiting approval"
+                : snapshot.pipeline.finalState === "partial"
+                  ? "Partial"
+                  : snapshot.pipeline.finalState
+            }
             tone={snapshot.pipeline.finalState === "halted" ? "text-negative" : "text-secondary"}
             detail={`Run ${snapshot.pipeline.id}`}
           />
@@ -576,6 +602,7 @@ function PipelineRunSummary({ snapshot }: { snapshot: DashboardSnapshot }) {
   const execute = snapshot.pipeline.stages.find((s) => s.stage === "EXECUTE");
   const risk = snapshot.pipeline.stages.find((s) => s.stage === "RISK");
   const form = snapshot.pipeline.stages.find((s) => s.stage === "FORM");
+  const ready = execute?.status === "active";
   return (
     <section className="panel p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -586,8 +613,13 @@ function PipelineRunSummary({ snapshot }: { snapshot: DashboardSnapshot }) {
             {new Date(snapshot.pipeline.asOf).toLocaleString("en-US", { timeZone: "America/New_York", timeZoneName: "short" })}
           </p>
         </div>
-        <span className="rounded-full border border-cyan/35 bg-cyan/10 px-2 py-1 font-mono text-[10px] text-cyan">
-          DRY-RUN ONLY
+        <span
+          className={cn(
+            "rounded-full border px-2 py-1 font-mono text-[10px]",
+            ready ? "border-cyan/35 bg-cyan/10 text-cyan" : "border-subtle text-secondary",
+          )}
+        >
+          {ready ? "AWAITING OPERATOR" : "PAPER COPILOT"}
         </span>
       </div>
       <div className="mt-4 grid gap-2 sm:grid-cols-3">
@@ -606,7 +638,7 @@ function PipelineRunSummary({ snapshot }: { snapshot: DashboardSnapshot }) {
           <span className="font-mono text-foreground">RISK</span> · {risk?.result ?? "—"}
         </p>
         <p className="mt-1">
-          <span className="font-mono text-foreground">EXECUTE</span> · {execute?.result ?? "Dry-run only — live submission disabled in the dashboard adapter."}
+          <span className="font-mono text-foreground">EXECUTE</span> · {execute?.result ?? "No order reached execution"}
         </p>
       </div>
     </section>
@@ -880,7 +912,29 @@ function RiskLabel({ value }: { value: RiskStatus }) {
 }
 
 function OpportunityInspector({ candidate, onClose }: { candidate: Candidate | null; onClose: () => void }) {
+  const { refresh } = useDashboard();
   const o = candidate?.order;
+  const executable = isPaperExecutable(candidate);
+  const [submitState, setSubmitState] = useState<SubmitState>("idle");
+  const [submitResult, setSubmitResult] = useState<PaperSubmitResponse | null>(null);
+
+  useEffect(() => {
+    setSubmitState("idle");
+    setSubmitResult(null);
+  }, [candidate?.ticker]);
+
+  async function onSubmitPaper() {
+    if (!candidate || !o || submitState === "submitting") return;
+    setSubmitState("submitting");
+    const response = await submitPaperTrade({
+      symbol: candidate.ticker,
+      clientOrderId: o.clientOrderId || undefined,
+    });
+    setSubmitResult(response);
+    setSubmitState(response.available && response.ok ? "success" : "error");
+    if (response.available) refresh();
+  }
+
   return (
     <Sheet open={Boolean(candidate)} onOpenChange={(open) => !open && onClose()}>
       {candidate ? (
@@ -944,25 +998,42 @@ function OpportunityInspector({ candidate, onClose }: { candidate: Candidate | n
                   <span className="text-secondary">{o.contracts} contract · max loss</span>
                   <span className="mono text-foreground">{currency(o.maxLoss)}</span>
                 </div>
-                {o.legs[0]?.dteOffset !== undefined ? (
+                {o.structure ? (
                   <p className="mt-2 text-xs text-muted">
-                    DTE offset <span className="mono text-secondary">{o.legs[0].dteOffset}</span>
+                    Structure · <span className="mono text-secondary">{o.structure}</span>
+                  </p>
+                ) : null}
+                {o.limitPrice != null ? (
+                  <p className="mt-1 text-xs text-muted">
+                    Limit ·{" "}
+                    <span className="mono text-secondary">
+                      {o.limitPrice < 0 ? `credit ${currency(Math.abs(o.limitPrice))}` : `debit ${currency(o.limitPrice)}`}
+                    </span>
                   </p>
                 ) : null}
                 <div className="mt-3 space-y-2">
                   {o.legs.map((leg, index) => (
-                    <div className="flex justify-between font-mono text-[11px]" key={`${leg.symbol}-${index}`}>
+                    <div className="flex justify-between gap-3 font-mono text-[11px]" key={`${leg.symbol}-${index}`}>
                       <span className={leg.side === "short" ? "text-negative" : "text-positive"}>
                         {leg.side.toUpperCase()} {leg.ratio} {leg.type.toUpperCase()}
                         {leg.delta ? ` · ${leg.delta}Δ` : ""}
+                        {leg.strike != null ? ` · ${leg.strike}` : ""}
                       </span>
-                      <span className="text-muted">{leg.resolved ? leg.symbol : "Option leg unresolved"}</span>
+                      <span className={cn("truncate text-right", leg.resolved ? "text-foreground" : "text-muted")}>
+                        {leg.resolved ? leg.symbol : "Option leg unresolved"}
+                      </span>
                     </div>
                   ))}
                 </div>
-                <p className="mt-3 border-t border-subtle pt-3 text-xs text-negative">
-                  Execution unavailable — option-leg resolution is incomplete.
-                </p>
+                {!executable ? (
+                  <p className="mt-3 border-t border-subtle pt-3 text-xs text-negative">
+                    Execution blocked — critic/risk approval or OCC leg resolution is incomplete.
+                  </p>
+                ) : (
+                  <p className="mt-3 border-t border-subtle pt-3 text-xs text-cyan">
+                    Critic + risk approved · executable OCC legs · paper trading only.
+                  </p>
+                )}
               </div>
             ) : (
               <p className="mt-2 text-xs text-muted">No formed order is available for this candidate.</p>
@@ -974,6 +1045,39 @@ function OpportunityInspector({ candidate, onClose }: { candidate: Candidate | n
               <RiskLabel value={candidate.risk} />
             </div>
           </section>
+          {executable ? (
+            <TradeReviewPanel
+              candidate={candidate}
+              submitState={submitState}
+              submitResult={submitResult}
+              onReview={() => setSubmitState("confirm")}
+              onCancel={() => setSubmitState("idle")}
+              onSubmit={onSubmitPaper}
+            />
+          ) : null}
+          {submitResult ? (
+            <PanelAlert
+              title={
+                submitState === "success"
+                  ? submitResult.filled
+                    ? "PAPER ORDER FILLED"
+                    : "PAPER ORDER SUBMITTED"
+                  : "Paper submission did not succeed"
+              }
+              detail={
+                [
+                  submitResult.symbol,
+                  submitResult.structure,
+                  submitResult.orderId ? `Alpaca Order ID: ${submitResult.orderId}` : null,
+                  submitResult.status ? `Status: ${String(submitResult.status).toUpperCase()}` : null,
+                  submitResult.detail,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")
+              }
+              tone={submitState === "success" ? "info" : "negative"}
+            />
+          ) : null}
           <footer className="border-t border-subtle pt-4">
             <Freshness value={{ source: "Candidate context", asOf: candidate.updatedAt, status: "fresh" }} />
           </footer>
@@ -981,6 +1085,95 @@ function OpportunityInspector({ candidate, onClose }: { candidate: Candidate | n
       </SheetContent>
       ) : null}
     </Sheet>
+  );
+}
+
+function TradeReviewPanel({
+  candidate,
+  submitState,
+  submitResult,
+  onReview,
+  onCancel,
+  onSubmit,
+}: {
+  candidate: Candidate;
+  submitState: SubmitState;
+  submitResult: PaperSubmitResponse | null;
+  onReview: () => void;
+  onCancel: () => void;
+  onSubmit: () => void;
+}) {
+  const o = candidate.order!;
+  const submitting = submitState === "submitting";
+  const confirmed = submitState === "confirm" || submitting || submitState === "success";
+  return (
+    <section className="rounded-control border border-cyan/30 bg-cyan/5 p-4" aria-label="Trade review">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="eyebrow">Trade review</p>
+          <h3 className="mt-1 font-display text-base font-semibold tracking-[-0.02em]">
+            {candidate.ticker} · paper submission
+          </h3>
+        </div>
+        <span className="rounded-full border border-warning/40 bg-warning/10 px-2 py-1 font-mono text-[10px] text-warning">
+          PAPER ONLY
+        </span>
+      </div>
+      <dl className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+        <div>
+          <dt className="text-muted">Underlying</dt>
+          <dd className="mono text-foreground">{candidate.price != null ? currency(candidate.price) : "Unavailable"}</dd>
+        </div>
+        <div>
+          <dt className="text-muted">Structure</dt>
+          <dd className="mono text-foreground">{o.structure ?? "put_credit_spread"}</dd>
+        </div>
+        <div>
+          <dt className="text-muted">Quantity</dt>
+          <dd className="mono text-foreground">{o.contracts}</dd>
+        </div>
+        <div>
+          <dt className="text-muted">Est. max loss</dt>
+          <dd className="mono text-foreground">{currency(o.maxLoss)}</dd>
+        </div>
+        <div>
+          <dt className="text-muted">Critic</dt>
+          <dd className="mono text-foreground">{candidate.critic.confidence} · {candidate.critic.decision}</dd>
+        </div>
+        <div>
+          <dt className="text-muted">Risk</dt>
+          <dd className="mono text-positive">{candidate.risk}</dd>
+        </div>
+      </dl>
+      <p className="mt-3 text-xs leading-5 text-secondary">{candidate.critic.thesis}</p>
+      <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+        {submitState === "idle" || submitState === "error" ? (
+          <Button variant="primary" onClick={onReview} className="w-full sm:w-auto">
+            Review & Submit Paper Trade
+          </Button>
+        ) : null}
+        {confirmed && submitState !== "success" ? (
+          <>
+            <Button
+              variant="primary"
+              onClick={onSubmit}
+              disabled={submitting}
+              aria-busy={submitting}
+              className="w-full sm:w-auto"
+            >
+              {submitting ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
+              {submitting ? "Submitting to Alpaca Paper…" : "Submit to Alpaca Paper"}
+            </Button>
+            <Button variant="ghost" onClick={onCancel} disabled={submitting} className="w-full sm:w-auto">
+              Cancel
+            </Button>
+          </>
+        ) : null}
+        {submitState === "success" && submitResult?.status === "duplicate" ? (
+          <p className="text-xs text-warning">Duplicate blocked — matching client order id already exists.</p>
+        ) : null}
+      </div>
+    </section>
   );
 }
 
@@ -1020,7 +1213,25 @@ function CommandOverview({ snapshot }: { snapshot: DashboardSnapshot }) {
                       </p>
                       <p>
                         Resolution · <span className="mono text-foreground">{lead.order.resolution}</span>
+                        {lead.order.structure ? (
+                          <>
+                            {" · "}
+                            Structure · <span className="mono text-foreground">{lead.order.structure}</span>
+                          </>
+                        ) : null}
                       </p>
+                      {lead.order.legs.map((leg, index) => (
+                        <p key={`${leg.symbol}-${index}`} className="mono text-[11px]">
+                          <span className={leg.side === "short" ? "text-negative" : "text-positive"}>
+                            {leg.side.toUpperCase()} {leg.type.toUpperCase()}
+                          </span>
+                          {" · "}
+                          {leg.resolved ? leg.symbol : "unresolved"}
+                        </p>
+                      ))}
+                      {isPaperExecutable(lead) ? (
+                        <p className="pt-2 text-cyan">Ready for operator review — open Opportunities to submit PAPER.</p>
+                      ) : null}
                     </div>
                   ) : (
                     <p className="mt-2 text-xs text-muted">No formed order is available for this candidate in the latest run.</p>
@@ -1195,7 +1406,16 @@ function PipelineView({ snapshot }: { snapshot: DashboardSnapshot }) {
           <AuditStat label="Critic approvals" value={String(approvals)} />
           <AuditStat label="Critic rejections" value={String(rejections)} />
           <AuditStat label="Risk halts" value={String(halts)} />
-          <AuditStat label="Execution" value="DRY-RUN ONLY" />
+          <AuditStat
+            label="Execution"
+            value={
+              snapshot.pipeline.stages.find((s) => s.stage === "EXECUTE")?.status === "active"
+                ? "AWAITING APPROVAL"
+                : snapshot.executions[0]?.status
+                  ? String(snapshot.executions[0].status).toUpperCase()
+                  : "OPERATOR"
+            }
+          />
         </div>
       </section>
       </Reveal>
@@ -1346,9 +1566,17 @@ function OpportunitiesView({ snapshot }: { snapshot: DashboardSnapshot }) {
 }
 
 function PortfolioView({ snapshot }: { snapshot: DashboardSnapshot }) {
+  const { refresh, loading } = useDashboard();
   return (
     <>
       <Reveal>
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs text-muted">Paper account state from Alpaca — refresh after submission.</p>
+          <Button variant="ghost" onClick={refresh} disabled={loading} aria-busy={loading}>
+            {loading ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : null}
+            Refresh account
+          </Button>
+        </div>
         <AccountRiskSummary snapshot={snapshot} />
       </Reveal>
       <div className="grid gap-5 xl:grid-cols-12">
@@ -1369,24 +1597,43 @@ function ExecutionLedger({ snapshot }: { snapshot: DashboardSnapshot }) {
       <div className="flex flex-col gap-2 border-b border-subtle px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="section-title">Execution ledger</h2>
-          <p className="mt-1 text-xs text-muted">dry-run · skipped · duplicate · submitted · error — never implied fills</p>
+          <p className="mt-1 text-xs text-muted">
+            submitted · pending · filled · rejected · duplicate · error — never implied fills
+          </p>
         </div>
         <span className="font-mono text-[11px] text-warning">PAPER ONLY</span>
       </div>
       <div className="table-shell">
-        <table className="w-full min-w-[760px]">
+        <table className="w-full min-w-[920px]">
           <thead className="table-head">
             <tr>
-              <th className="h-10 px-5">Symbol</th>
+              <th className="h-10 px-5">Time</th>
+              <th className="h-10 px-3">Symbol</th>
               <th className="h-10 px-3">Status</th>
               <th className="h-10 px-3">Client order ID</th>
+              <th className="h-10 px-3">Alpaca order ID</th>
               <th className="h-10 px-5">Detail</th>
             </tr>
           </thead>
           <tbody>
             {snapshot.executions.map((execution) => (
-              <tr className="table-row" key={execution.clientOrderId}>
-                <td className="mono px-5 py-3 text-xs">{execution.symbol}</td>
+              <tr className="table-row" key={`${execution.clientOrderId}-${execution.orderId ?? ""}`}>
+                <td className="mono px-5 py-3 text-[11px] text-muted">
+                  {execution.createdAt
+                    ? new Date(execution.createdAt).toLocaleTimeString("en-US", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        second: "2-digit",
+                        timeZone: "America/New_York",
+                      })
+                    : "—"}
+                </td>
+                <td className="mono px-3 py-3 text-xs">
+                  {execution.symbol}
+                  {execution.structure ? (
+                    <span className="ml-2 text-[10px] text-muted">{execution.structure}</span>
+                  ) : null}
+                </td>
                 <td className="px-3 py-3">
                   <ExecutionLabel value={execution.status} />
                 </td>
@@ -1400,15 +1647,16 @@ function ExecutionLedger({ snapshot }: { snapshot: DashboardSnapshot }) {
                     <Copy className="h-3 w-3 shrink-0" />
                   </button>
                 </td>
+                <td className="mono px-3 py-3 text-[11px] text-secondary">{execution.orderId ?? "—"}</td>
                 <td className="px-5 py-3 text-xs text-secondary">{execution.detail}</td>
               </tr>
             ))}
             {snapshot.executions.length === 0 ? (
               <tr>
-                <td colSpan={4}>
+                <td colSpan={6}>
                   <EmptyState
-                    title="No executions in this snapshot."
-                    detail="Adapter v1 does not yet stream a live execution ledger. Dry-run results appear here when the pipeline returns them."
+                    title="No paper executions yet."
+                    detail="Operator-approved Alpaca paper submissions appear here with truthful broker status."
                   />
                 </td>
               </tr>
@@ -1426,10 +1674,14 @@ function ExecutionLabel({ value }: { value: ExecutionStatus }) {
     skipped_no_legs: ["Skipped", "text-warning"],
     duplicate: ["Duplicate", "text-warning"],
     submitted: ["Submitted", "text-positive"],
+    pending: ["Pending", "text-cyan"],
+    filled: ["Filled", "text-positive"],
+    rejected: ["Rejected", "text-negative"],
+    cancelled: ["Cancelled", "text-muted"],
     error: ["Error", "text-negative"],
     unavailable: ["Unavailable", "text-negative"],
   };
-  const [label, tone] = map[value];
+  const [label, tone] = map[value] ?? [value, "text-secondary"];
   return <span className={cn("font-mono text-[11px]", tone)}>{label}</span>;
 }
 

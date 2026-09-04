@@ -25,7 +25,9 @@ def start_prewarm() -> None:
 
 def reset_for_tests() -> None:
     from synthetix_alpha.api.ttl_cache import critique_cache, gather_cache, screen_cache
+    from synthetix_alpha.api import trade_store
 
     screen_cache.clear()
     gather_cache.clear()
     critique_cache.clear()
+    trade_store.clear()
