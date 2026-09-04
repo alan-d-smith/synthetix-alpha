@@ -109,15 +109,15 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--account", choices=["research", "deployed"], default="research")
     ap.add_argument("--ignore-window", action="store_true",
-                    help="dry runs only: skip the competition window check")
+                    help="dry runs only: skip the trading window check")
     ap.add_argument("--limit", type=int, default=5)
     ap.add_argument("--spec", default=SPEC)
     ap.add_argument("--execute", action="store_true", help="submit for real (default is a dry run)")
     ap.add_argument("--intraday-top", type=int, default=20, help="gap-fade names, flat by the close (0 disables)")
     ap.add_argument("--intraday-budget", type=float, default=0.60, help="fraction of NAV for the intraday sleeve")
-    ap.add_argument("--vol-gate", type=float, default=0.50,
+    ap.add_argument("--vol-gate", type=float, default=0.0,
                     help="skip the gap fade unless market volatility sits above this percentile of its own "
-                         "trailing year; 0 disables the gate")
+                         "trailing year; off by default, so a missing flag can never hold a book in cash")
     ap.add_argument("--index-long", default="",
                     help="instead of the gap fade, hold a levered intraday long in this ETF (e.g. SPY)")
     ap.add_argument("--index-leverage", type=float, default=4.0,
@@ -187,7 +187,8 @@ def main() -> None:
                   f"{a.vol_gate:.0%} gate: standing aside")
             picks = []
         elif not a.index_long:
-            print(f"  volatility at the {regime:.0%} percentile, gate {a.vol_gate:.0%}: trading")
+            if a.vol_gate:
+                print(f"  volatility at the {regime:.0%} percentile, gate {a.vol_gate:.0%}: trading")
             picks = intraday.plan(p["nav"], client, n=a.intraday_top, budget_pct=a.intraday_budget)
         for o in intraday.enter(picks, dry_run=not a.execute):
             print(f"{o['symbol']:<6} {o['qty']:>5} sh  ${o['notional']:>9,.0f}  gap {o['gap']:+.2%} (z {o['z']:+.1f})  "

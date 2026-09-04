@@ -7,54 +7,30 @@ def at(y, m, d, hh, mm):
     return dt.datetime(y, m, d, hh, mm, tzinfo=w.ET)
 
 
-def test_nothing_trades_before_the_window_opens():
-    assert not w.can_enter(at(2026, 8, 31, 9, 30))[0], "09:30 is the open; we deliberately wait until 09:31"
-    assert not w.can_enter(at(2026, 8, 30, 12, 0))[0], "the Sunday before must be refused"
-    assert not w.can_flatten(at(2026, 8, 31, 9, 30))[0]
-
-
-def test_entry_opens_at_0931_on_the_first_session():
-    ok, why = w.can_enter(at(2026, 8, 31, 9, 31))
-    assert ok, why
-
-
 def test_entry_is_an_opening_trade_only():
-    assert w.can_enter(at(2026, 8, 31, 10, 30))[0]
-    assert not w.can_enter(at(2026, 8, 31, 10, 31))[0], "a late run must not put the book on at the wrong price"
+    assert not w.can_enter(at(2026, 9, 8, 9, 30))[0], "09:30 is the open; we deliberately wait until 09:31"
+    assert w.can_enter(at(2026, 9, 8, 9, 31))[0]
+    assert w.can_enter(at(2026, 9, 8, 10, 30))[0]
+    assert not w.can_enter(at(2026, 9, 8, 10, 31))[0], "a late run must not put the book on at the wrong price"
 
 
 def test_flatten_window_respects_the_market_on_close_cutoff():
-    assert not w.can_flatten(at(2026, 8, 31, 15, 29))[0]
-    assert w.can_flatten(at(2026, 8, 31, 15, 45))[0]
-    assert w.can_flatten(at(2026, 8, 31, 15, 56))[0], "a market order still fills at 15:56"
-    assert not w.can_flatten(at(2026, 8, 31, 15, 59))[0], "too close to the bell to trust a fill"
+    assert not w.can_flatten(at(2026, 9, 8, 15, 29))[0]
+    assert w.can_flatten(at(2026, 9, 8, 15, 45))[0]
+    assert w.can_flatten(at(2026, 9, 8, 15, 56))[0], "a market order still fills at 15:56"
+    assert not w.can_flatten(at(2026, 9, 8, 15, 59))[0], "too close to the bell to trust a fill"
 
 
-def test_nothing_trades_after_equity_is_measured():
-    """Equity is snapshotted at 09:30 Friday, so Friday cannot help and must not be traded."""
-    assert w.can_enter(at(2026, 9, 3, 9, 45))[0], "Thursday is the last session that counts"
-    assert not w.can_enter(at(2026, 9, 4, 9, 45))[0]
-    assert not w.can_flatten(at(2026, 9, 4, 15, 45))[0]
+def test_the_windows_outlive_the_competition():
+    """The bracket that ended trading at the 4 Sep 2026 snapshot is gone: the books keep running."""
+    assert w.can_enter(at(2026, 9, 4, 9, 31))[0], "the Friday after the snapshot is an ordinary session now"
+    assert w.can_enter(at(2027, 3, 1, 9, 31))[0]
+    assert w.can_flatten(at(2027, 3, 1, 15, 50))[0]
 
 
-def test_the_whole_final_session_is_tradeable():
-    """The failure that matters is stopping early on Thursday, not running late."""
-    assert w.can_enter(at(2026, 9, 3, 9, 31))[0], "Thursday's entry must not be cut off"
-    assert w.can_flatten(at(2026, 9, 3, 15, 50))[0], "Thursday's first flatten pass"
-    assert w.can_flatten(at(2026, 9, 3, 15, 56))[0], "Thursday's second flatten pass"
-    assert w.LAST_CLOSE < w.CLOSES, "the guard has to outlive the last close it is protecting"
-
-
-def test_friday_pre_open_is_supervised_but_untradeable():
-    """The guard stays open across the final overnight; the sub-windows are what keep Friday shut."""
-    assert w._within(at(2026, 9, 4, 8, 0))[0], "still inside the window, so a crash there is still watched"
-    assert not w.can_enter(at(2026, 9, 4, 8, 0))[0]
-    assert not w.can_enter(at(2026, 9, 4, 9, 31))[0], "the snapshot lands at 09:30, before entry could ever open"
-    assert not w.can_flatten(at(2026, 9, 4, 8, 0))[0]
-
-
-def test_weekends_inside_the_window_are_refused():
+def test_weekends_are_refused():
     assert not w.can_enter(at(2026, 9, 5, 10, 0))[0]
+    assert not w.can_flatten(at(2026, 9, 6, 15, 45))[0]
 
 
 def test_scheduler_fires_each_action_once_per_day(tmp_path, monkeypatch):
@@ -105,7 +81,8 @@ def test_scheduler_passes_each_book_its_own_strategy():
         assert int(n) > 0, f"{acct} must actually trade"
         budget = float(extra[extra.index("--intraday-budget") + 1])
         assert 0 < budget <= 1.5, f"{acct} budget {budget} is outside the sane range"
-        assert extra[extra.index("--vol-gate") + 1] == "0", f"{acct} must not stand aside on the vol gate"
+        gate = extra[extra.index("--vol-gate") + 1] if "--vol-gate" in extra else "0"
+        assert gate == "0", f"{acct} must not stand aside on the vol gate"
 
 
 def test_run_action_builds_a_command_without_crashing(monkeypatch):

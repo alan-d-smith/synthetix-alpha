@@ -549,6 +549,27 @@ def test_vol_gate_blocks_the_sleeve_in_calm_markets(monkeypatch, capsys):
     assert "standing aside" in capsys.readouterr().out
 
 
+def test_vol_gate_is_off_unless_asked_for(monkeypatch, capsys):
+    """The gate is opt-in: a runner given no gate flag must trade, so a missing flag can never hold a book
+    in cash."""
+    from synthetix_alpha.live import run as live_run, intraday
+    planned = []
+    monkeypatch.setattr(intraday, "vol_regime", lambda client: (_ for _ in ()).throw(AssertionError("no gate, no regime call")))
+    monkeypatch.setattr(intraday, "plan", lambda *a, **k: planned.append(1) or [])
+    monkeypatch.setattr(intraday, "enter", lambda picks, **k: [])
+    monkeypatch.setattr(live_run, "AlpacaClient", lambda *a, **k: object())
+    monkeypatch.setattr(live_run, "plan", lambda *a, **k: {"nav": 100000.0, "skipped": {}, "halts": [],
+                                                          "approved": [], "screened": []})
+    monkeypatch.setattr(live_run.cli, "account",
+                        lambda: {"account_number": "X", "equity": "100000", "cash": "100000"})
+    monkeypatch.setattr(live_run.window, "can_enter", lambda t=None: (True, "ok"))
+    monkeypatch.setattr(live_run, "use_account", lambda name: None)
+    monkeypatch.setattr("sys.argv", ["run", "--intraday-top", "10", "--crypto-budget", "0", "--limit", "0"])
+    live_run.main()
+    assert planned == [1], "with no gate flag the sleeve must build its plan"
+    assert "standing aside" not in capsys.readouterr().out
+
+
 def test_index_plan_respects_buying_power():
     """Four times NAV exceeds what the account can actually borrow once the price moves, so the order has
     to be sized off buying power, not off the leverage number."""

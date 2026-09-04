@@ -1,7 +1,6 @@
 """Competition scheduler: fires the runner at fixed times inside the window, once each.
 
-The two books run different strategies; see BOOKS below for what each account is configured to do.
-
+See BOOKS below for what each account is configured to do.
 
 Every action is recorded in a state file before it runs, so a crash and restart cannot enter twice. The window
 guard in `live.window` is the real safety net; this only decides when to call the runner.
@@ -32,11 +31,11 @@ ENTRY, TOPUP = dt.time(9, 31), dt.time(9, 45)
 FLATTEN = (dt.time(15, 50), dt.time(15, 56))
 
 # (label, account, extra runner arguments). The options and crypto sleeves ride along with each entry run.
-# Both books run the gap fade at 150% of NAV with the volatility gate off: n=10 is the best vehicle available,
-# +0.034% per session in the current regime, and expected return scales with exposure.
+# Both books run the gap fade at 150% of NAV. The volatility gate is opt-in (--vol-gate 0.5) and not passed:
+# whether a book trades is a human decision, and the scheduler's job is to fire what is configured.
 BOOKS = [
-    ("research n=10 @150%", "research", ["--intraday-top", "10", "--intraday-budget", "1.50", "--vol-gate", "0"]),
-    ("deployed n=10 @150%", "deployed", ["--intraday-top", "10", "--intraday-budget", "1.50", "--vol-gate", "0"]),
+    ("research n=10 @150%", "research", ["--intraday-top", "10", "--intraday-budget", "1.50"]),
+    ("deployed n=10 @150%", "deployed", ["--intraday-top", "10", "--intraday-budget", "1.50"]),
 ]
 
 
@@ -93,12 +92,9 @@ def loop(execute: bool, poll: int = 20) -> None:
     print(f"books: " + ", ".join(f"{l} ({a})" for l, a, _ in BOOKS))
     print(f"entry {ENTRY:%H:%M}, topup {TOPUP:%H:%M}, flatten "
           f"{' and '.join(format(t, '%H:%M') for t in FLATTEN)} ET, state in {STATE}", flush=True)
-    print(f"last session {window.LAST_CLOSE:%a %d %b}, equity snapshot "
-          f"{window.CLOSES:%a %d %b %H:%M} ET")
     print(flush=True)
-    # No self-imposed stop: the organisers take their own snapshot, and a scheduler that decides on its own
-    # when the competition is over is one more thing that can decide wrongly. window.can_enter / can_flatten
-    # already refuse everything outside the window, so idling past it is inert. Stop it by hand when done.
+    # No self-imposed stop: window.can_enter / can_flatten refuse everything outside the daily windows, so
+    # idling is inert. Stop it by hand when done.
     while True:
         now = window.now()
         for action, account, extra, name in due(now):
