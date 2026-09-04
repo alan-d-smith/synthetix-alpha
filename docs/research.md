@@ -103,8 +103,6 @@ Alternates kept for regime coverage: `put_diagonal_ivrv_robust.json` (189 trades
 
 ## What verification found
 
-![Gate sweep and parameter fragility](img/put_vertical_ivrv_research.png)
-
 
 **Survives** (numbers are for the deployed `put_vertical_ivrv`):
 - **Independent vendor, unseen years** — Dolt SPY 2019–2026 (the fitting data ends in 2022): Sharpe **0.65** over
@@ -289,16 +287,15 @@ runs still go into the append-only `progress.jsonl`; only improvements are rende
 
 ## Regenerating the figures
 
-Both figures are produced from the backtest itself, so they cannot drift from the numbers in this document:
+The performance figure is produced from the backtest itself, so it cannot drift from the numbers in this document:
 
 ```sh
-python -m synthetix_alpha.strategy.verify strategies/put_vertical_ivrv.json --oos AAPL --dolt SPY
-python -m synthetix_alpha.strategy.plots  strategies/put_vertical_ivrv.json     --verify datasets/research/verify/put_vertical_ivrv_verify.json
+python -m synthetix_alpha.strategy.plots strategies/put_vertical_ivrv.json
+python -m synthetix_alpha.strategy.plots strategies/put_vertical_ivrv.json --fills
 ```
 
-The plot script writes `docs/img/<spec name>_performance.png` and `<spec name>_research.png`. If you change a spec or
-the engine on a branch, rerun both commands and commit the regenerated PNGs alongside the updated tables here. The gate
-sweep re-runs one backtest per threshold, so it takes a few minutes; pass `--no-sweep` to skip it.
+The first command writes `docs/img/<spec name>_performance.png`, the second the underlying-with-fills figure. If you
+change a spec or the engine on a branch, rerun both and commit the regenerated PNGs alongside the updated tables here.
 
 ## arXiv intake 2026-08-29
 
@@ -1407,7 +1404,7 @@ Alpaca open and pricing every leg on LSE gives the same answer: −2.7bp/day ope
 The Fama-MacBeth coefficient that survived the look-ahead fix (t −3.5) is the same artefact seen cross-sectionally:
 a regression of the open-to-close return on the gap measured from that open finds the open's own error.
 
-### What the books run
+### What the book runs
 
 Split by where SPY's 20-day realised volatility sits in its trailing year, the live rule from the 09:35 fill:
 
@@ -1421,7 +1418,7 @@ regime-dependent, would hold cash there, and on the honest numbers that is a was
 fade is worth about −$100 a session with a $1,300 standard deviation, and standing aside trades the whole
 distribution for a certain zero. The gate stays available as an option and is left off; whether a book trades is a
 decision for the desk, not the runner. The levered index long is not an alternative — SPY open-to-close in the calm
-half is +0.3bp/day (t 0.10) with the variance of ten gap-fade baskets. Both books run the sleeve at 150% of NAV.
+half is +0.3bp/day (t 0.10) with the variance of ten gap-fade baskets. The book runs the sleeve at 150% of NAV.
 
 What is left of the idea is the fill, not the signal: the +5bp lives between the auction print and the first
 trade after it, and only a market-on-open order sees that price, which requires ranking on pre-market quotes and an

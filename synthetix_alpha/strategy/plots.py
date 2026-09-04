@@ -1,10 +1,9 @@
-"""Performance and research figures for a spec. Rerun after any change and commit the PNGs."""
+"""Performance and fills figures for a spec. Rerun after any change and commit the PNGs."""
 
 from __future__ import annotations
 
 import argparse
 import copy
-import json
 from pathlib import Path
 
 import matplotlib as mpl
@@ -123,39 +122,6 @@ def trades_panel(ax, trades: pd.DataFrame):
     ax.set_ylabel("trades")
 
 
-def gate_panel(ax, sweep: list[dict], deployed: float | None):
-    gates = ["none" if r["gate"] is None else f"{r['gate']:.2f}" for r in sweep]
-    vals = [r["score"] for r in sweep]
-    on = [deployed is not None and r["gate"] is not None and abs(r["gate"] - deployed) < 1e-9 for r in sweep]
-    ax.bar(gates, vals, 0.62, color=[SERIES[0] if o else "#c9d6e8" for o in on], zorder=3, linewidth=0)
-    for x, (v, o) in enumerate(zip(vals, on)):
-        ax.annotate(f"{v:+.2f}", (x, v), ha="center", va="bottom" if v >= 0 else "top", fontsize=7.5,
-                    fontweight="semibold" if o else "normal", color=INK if o else INK_2,
-                    xytext=(0, 3 if v >= 0 else -3), textcoords="offset points")
-    ax.axhline(0, color=AXIS, lw=0.8, zorder=4)
-    ax.margins(y=0.2)
-    _finish(ax, "The gate is the edge", "selection score vs minimum IV/RV to enter; deployed value highlighted", pct_y=False)
-    ax.set_xlabel("IV / RV entry gate")
-
-
-def fragility_panel(ax, fragility: dict, base: float):
-    items = sorted(((k, v) for k, v in fragility.items() if isinstance(v, (int, float))), key=lambda kv: kv[1])
-    labels = [k for k, _ in items]
-    vals = [max(v, -1.0) for _, v in items]  # clip the -9 "too few trades" sentinel
-    ax.barh(labels, vals, 0.62, color=[NEG if v < 0.5 * base else SERIES[0] for v in vals], zorder=3, linewidth=0)
-    ax.axvline(base, color=INK_2, lw=1.2, zorder=4)
-    ax.annotate(f"base {base:.2f}", (base, len(labels) - 0.35), color=INK_2, fontsize=8,
-                xytext=(-2, 0), textcoords="offset points", va="center", ha="right", fontweight="semibold")
-    ax.axvline(0.5 * base, color=MUTED, lw=1.0, zorder=4)
-    ax.annotate("half base", (0.5 * base, -0.45), color=MUTED, fontsize=7.5, ha="center",
-                xytext=(0, -2), textcoords="offset points", va="top", annotation_clip=False)
-    ax.grid(axis="y", visible=False)
-    ax.grid(axis="x", visible=True)
-    med = float(np.median(vals))
-    _finish(ax, "Parameter fragility", f"score under one-at-a-time perturbation · median {med:.2f}", pct_y=False)
-    ax.set_xlabel("selection score (clipped at −1)")
-
-
 def _dates(idx) -> pd.DatetimeIndex:
     return pd.to_datetime(pd.Series(list(idx)))
 
@@ -268,7 +234,7 @@ def gate_sweep(spec: Spec, gates=(None, 1.0, 1.1, 1.15, 1.2, 1.25, 1.3)) -> list
     return out
 
 
-def build(spec: Spec, out_dir: Path = OUT, sweep: bool = True, verify_json: Path | None = None) -> list[Path]:
+def build(spec: Spec, out_dir: Path = OUT) -> list[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     tmp = Path("datasets/research/plot_runs")
     res = backtest(spec, trades_dir=tmp)
@@ -298,22 +264,6 @@ def build(spec: Spec, out_dir: Path = OUT, sweep: bool = True, verify_json: Path
         plt.close(fig)
         written.append(p)
 
-        panels = []
-        if sweep:
-            panels.append(("gate", gate_sweep(spec)))
-        if verify_json and Path(verify_json).exists():
-            v = json.loads(Path(verify_json).read_text())
-            panels.append(("fragility", (v["fragility"], v["base_score"])))
-        if panels:
-            fig, axes = plt.subplots(1, len(panels), figsize=(6.2 * len(panels), 4.6))
-            axes = np.atleast_1d(axes)
-            for ax, (kind, data) in zip(axes, panels):
-                gate_panel(ax, data, _deployed_gate(spec)) if kind == "gate" else fragility_panel(ax, *data)
-            fig.tight_layout()
-            p = out_dir / f"{spec.name}_research.png"
-            fig.savefig(p)
-            plt.close(fig)
-            written.append(p)
     return written
 
 
@@ -326,9 +276,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("spec", nargs="?", help="omit with --fills-all to do every strategy")
     ap.add_argument("--out", default=str(OUT))
-    ap.add_argument("--verify", help="verify.py JSON, adds the fragility panel")
-    ap.add_argument("--no-sweep", action="store_true")
-    ap.add_argument("--fills", action="store_true", help="underlying-with-fills figure instead of the research set")
+    ap.add_argument("--fills", action="store_true", help="underlying-with-fills figure instead of performance")
     ap.add_argument("--fills-all", action="store_true", help="the fills figure for every spec in strategies/")
     a = ap.parse_args()
     out = Path(a.out)
@@ -348,7 +296,7 @@ def main() -> None:
     if a.fills:
         print(strategy_figure(Spec.load(a.spec), out))
         return
-    for p in build(Spec.load(a.spec), out, not a.no_sweep, a.verify):
+    for p in build(Spec.load(a.spec), out):
         print(p)
 
 
